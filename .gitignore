@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Generated card cache (regenerate with npm run fetch-cards)
+server/data/
