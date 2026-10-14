@@ -40,6 +40,7 @@ export default function App() {
     const onMatch = (data: { opponentName: string }) =>
       setStatus("Match found! Opponent: " + data.opponentName);
     const onState = (data: { gameState: GameStateView }) => setGame(data.gameState);
+    const onGameError = (data: { message: string }) => setStatus("Error: " + data.message);
 
     socket.on("connect", onConnect);
     socket.on("pong_test", onPong);
@@ -47,6 +48,7 @@ export default function App() {
     socket.on("deck_invalid", onInvalid);
     socket.on("match_found", onMatch);
     socket.on("state_update", onState);
+    socket.on("game_error", onGameError);
     return () => {
       socket.off("connect", onConnect);
       socket.off("pong_test", onPong);
@@ -54,6 +56,7 @@ export default function App() {
       socket.off("deck_invalid", onInvalid);
       socket.off("match_found", onMatch);
       socket.off("state_update", onState);
+      socket.off("game_error", onGameError);
     };
   }, []);
 
@@ -92,6 +95,41 @@ export default function App() {
           <h2>
             {game.firstPlayerId === game.you.id ? "You go first" : "Opponent goes first"}
           </h2>
+
+          {game.status === "mulligan" && (
+            <div style={{ margin: "16px 0", padding: 12, border: "1px solid #888" }}>
+              {!game.you.keptHand ? (
+                <>
+                  <p>
+                    Keep this hand, or mulligan? (Mulligans taken: {game.you.mulligansTaken})
+                  </p>
+                  <button onClick={() => socket.emit("mulligan_decision", { keep: true })}>
+                    Keep
+                  </button>{" "}
+                  <button
+                    disabled={game.you.mulligansTaken >= 6}
+                    onClick={() => socket.emit("mulligan_decision", { keep: false })}
+                  >
+                    Mulligan
+                  </button>
+                  {game.you.mulligansTaken > 0 && (
+                    <p>
+                      If you keep, {game.you.mulligansTaken} random card(s) go to the bottom
+                      of your library.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p>Hand kept. Waiting for opponent...</p>
+              )}
+            </div>
+          )}
+          {game.status === "in_progress" && (
+            <p>
+              <strong>Game started.</strong>
+            </p>
+          )}
+
           <p>
             Your life: {game.you.life} | Your library: {game.you.libraryCount} cards
           </p>

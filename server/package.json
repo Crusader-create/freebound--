@@ -9,7 +9,8 @@
     "fetch-cards": "tsx src/scripts/fetch-cards.ts",
     "audit-pool": "tsx src/scripts/audit-pool.ts",
     "validate-demo": "tsx src/scripts/validate-demo.ts",
-    "pool-candidates": "tsx src/scripts/pool-candidates.ts"
+    "pool-candidates": "tsx src/scripts/pool-candidates.ts",
+    "test": "vitest run"
   },
   "keywords": [],
   "author": "",
@@ -19,7 +20,8 @@
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.4",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "express": "^5.2.1",

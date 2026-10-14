@@ -6,6 +6,7 @@ import type { GameState } from "../../shared/src/types";
 import { loadCardCache } from "./cards/cardCache";
 import { validateDeck } from "./cards/validateDeck";
 import { createGame, toView } from "./game/createGame";
+import { keepHand, takeMulligan } from "./game/mulligan";
 import { MatchmakingQueue, type QueueEntry } from "./matchmaking";
 
 const app = express();
@@ -27,6 +28,11 @@ function sendState(game: GameState) {
   for (const player of game.players) {
     io.to(player.id).emit("state_update", { gameState: toView(game, player.id) });
   }
+}
+
+/** Tells one player their action was refused, and why. */
+function sendError(socketId: string, message: string) {
+  io.to(socketId).emit("game_error", { message });
 }
 
 function startGame(a: QueueEntry, b: QueueEntry) {
@@ -88,6 +94,36 @@ io.on("connection", (socket) => {
       return;
     }
     startGame(opponent, entry);
+  });
+
+  // The client only says keep/mulligan. The server works out which game the
+  // player is in from their socket, so a client can't act in someone else's.
+  socket.on("mulligan_decision", (payload: unknown) => {
+    const keep = (payload as { keep?: unknown } | null)?.keep;
+    if (typeof keep !== "boolean") {
+      sendError(socket.id, "Invalid mulligan decision.");
+      return;
+    }
+
+    const gameId = gameBySocket.get(socket.id);
+    const game = gameId ? games.get(gameId) : undefined;
+    if (!game) {
+      sendError(socket.id, "You're not in a game.");
+      return;
+    }
+
+    const result = keep ? keepHand(game, socket.id) : takeMulligan(game, socket.id);
+    if (!result.ok) {
+      sendError(socket.id, result.reason);
+      return;
+    }
+
+    games.set(game.gameId, result.state);
+    sendState(result.state);
+
+    if (game.status === "mulligan" && result.state.status === "in_progress") {
+      io.to(game.gameId).emit("game_start", { gameId: game.gameId });
+    }
   });
 
   socket.on("disconnect", () => {
