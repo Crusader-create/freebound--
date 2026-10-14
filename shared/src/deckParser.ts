@@ -93,34 +93,3 @@ export function parseDecklist(rawText: string): ParsedDecklist {
 
   return { mainDeck, sideboard };
 }
-
-/**
- * Example usage / manual smoke test — not a real test suite, just a quick
- * way to sanity-check the parser. Run with: npx tsx shared/src/deckParser.ts
- */
-import { fileURLToPath } from "url";
-
-const isRunDirectly = process.argv[1] === fileURLToPath(import.meta.url);
-
-if (isRunDirectly) {
-  const sample = `
-Creature (12)
-4 Monastery Swiftspear
-4x Goblin Guide
-4 Ash Zealot
-
-Instant (8)
-4 Lightning Bolt
-4 Shock
-
-1 Fable of the Mirror-Breaker (MID) 143
-
-Sideboard
-2 Abrade
-1 Smash to Smithereens
-`;
-
-  const result = parseDecklist(sample);
-  console.log("Main deck:", result.mainDeck);
-  console.log("Sideboard:", result.sideboard);
-}

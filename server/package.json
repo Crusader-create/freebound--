@@ -6,7 +6,10 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "tsx watch src/index.ts",
-    "fetch-cards": "tsx src/scripts/fetch-cards.ts"
+    "fetch-cards": "tsx src/scripts/fetch-cards.ts",
+    "audit-pool": "tsx src/scripts/audit-pool.ts",
+    "validate-demo": "tsx src/scripts/validate-demo.ts",
+    "pool-candidates": "tsx src/scripts/pool-candidates.ts"
   },
   "keywords": [],
   "author": "",
