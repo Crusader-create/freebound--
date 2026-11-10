@@ -91,14 +91,24 @@ export type StackObject = {
 
 // ---------- Game state ----------
 
+/**
+ * Every step of a turn, in order. Combat is split into its own steps because
+ * players get priority in each one. "untap" and "cleanup" never give anyone
+ * priority, so the game is never actually resting on them.
+ */
 export type Phase =
   | "untap"
   | "upkeep"
   | "draw"
   | "main1"
-  | "combat"
+  | "beginning_of_combat"
+  | "declare_attackers"
+  | "declare_blockers"
+  | "combat_damage"
+  | "end_of_combat"
   | "main2"
-  | "end";
+  | "end"
+  | "cleanup";
 
 export type GameStatus = "mulligan" | "in_progress" | "finished";
 
@@ -118,7 +128,7 @@ export type GameState = {
   consecutivePasses: number; // phase/stack advances when this reaches 2
   turnNumber: number;
   phase: Phase;
-  stack: StackObject[];
+  stack: StackObject[]; // the TOP of the stack is the LAST element
   winnerId: string | null;
   endReason: GameEndReason | null;
 };

@@ -20,6 +20,10 @@ const SAMPLE_DECK = `4 Swab Goblin
 
 type DeckError = { code: string; message: string };
 
+function phaseLabel(phase: string): string {
+  return phase.replace(/_/g, " ");
+}
+
 export default function App() {
   const [status, setStatus] = useState("connecting...");
   const [deckText, setDeckText] = useState("");
@@ -39,7 +43,10 @@ export default function App() {
     };
     const onMatch = (data: { opponentName: string }) =>
       setStatus("Match found! Opponent: " + data.opponentName);
-    const onState = (data: { gameState: GameStateView }) => setGame(data.gameState);
+    const onState = (data: { gameState: GameStateView }) => {
+      setGame(data.gameState);
+      setStatus("OK");
+    };
     const onGameError = (data: { message: string }) => setStatus("Error: " + data.message);
 
     socket.on("connect", onConnect);
@@ -59,6 +66,25 @@ export default function App() {
       socket.off("game_error", onGameError);
     };
   }, []);
+
+  const myPriority = game !== null && game.priorityPlayerId === game.you.id;
+  const myTurn = game !== null && game.activePlayerId === game.you.id;
+  const inMainPhase = game !== null && (game.phase === "main1" || game.phase === "main2");
+  const canPlayLand =
+    game !== null &&
+    game.status === "in_progress" &&
+    myTurn &&
+    myPriority &&
+    inMainPhase &&
+    game.stack.length === 0 &&
+    game.you.landsPlayedThisTurn < 1;
+  const canCastCreature =
+    game !== null &&
+    game.status === "in_progress" &&
+    myTurn &&
+    myPriority &&
+    inMainPhase &&
+    game.stack.length === 0;
 
   return (
     <div style={{ padding: 40, fontFamily: "sans-serif", maxWidth: 800 }}>
@@ -124,28 +150,108 @@ export default function App() {
               )}
             </div>
           )}
+
           {game.status === "in_progress" && (
+            <div style={{ margin: "16px 0", padding: 12, border: "1px solid #888" }}>
+              <p>
+                <strong>Turn {game.turnNumber}</strong> - {myTurn ? "your turn" : "opponent's turn"}{" "}
+                - step: <strong>{phaseLabel(game.phase)}</strong>
+              </p>
+              <p>{myPriority ? "You have priority." : "Opponent has priority."}</p>
+              <button disabled={!myPriority} onClick={() => socket.emit("pass_priority")}>
+                Pass priority
+              </button>
+              {import.meta.env.DEV && (
+                <button style={{ marginLeft: 8 }} onClick={() => socket.emit("debug_pass_both")}>
+                  Pass for both players (dev only)
+                </button>
+              )}
+
+              <h3>Stack ({game.stack.length})</h3>
+              {game.stack.length === 0 ? (
+                <p>(empty)</p>
+              ) : (
+                <ul>
+                  {game.stack
+                    .slice()
+                    .reverse()
+                    .map((item, i) => (
+                      <li key={item.id}>
+                        {item.source.card.name} - cast by{" "}
+                        {item.controllerId === game.you.id ? "you" : "opponent"}
+                        {i === 0 ? " (top, resolves next)" : ""}
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {game.status === "finished" && (
             <p>
-              <strong>Game started.</strong>
+              <strong>Game over.</strong> {game.winnerId === game.you.id ? "You win" : "You lose"}{" "}
+              ({game.endReason})
             </p>
           )}
 
           <p>
-            Your life: {game.you.life} | Your library: {game.you.libraryCount} cards
+            Your life: {game.you.life} | Your library: {game.you.libraryCount} cards | Lands
+            played this turn: {game.you.landsPlayedThisTurn}
           </p>
+
           <h3>Your hand ({game.you.handCount})</h3>
           <ul>
             {game.you.hand?.map((c) => (
               <li key={c.instanceId}>
-                {c.card.name} {c.card.manaCost}
+                {c.card.name} {c.card.manaCost}{" "}
+                {c.card.types.includes("Land") && (
+                  <button
+                    disabled={!canPlayLand}
+                    onClick={() => socket.emit("play_land", { cardInstanceId: c.instanceId })}
+                  >
+                    Play land
+                  </button>
+                )}
+                {c.card.types.includes("Creature") && (
+                  <button
+                    disabled={!canCastCreature}
+                    onClick={() => socket.emit("cast_spell", { cardInstanceId: c.instanceId })}
+                  >
+                    Cast
+                  </button>
+                )}
               </li>
             ))}
           </ul>
+
+          <h3>Your battlefield ({game.you.battlefield.length})</h3>
+          <ul>
+            {game.you.battlefield.map((c) => (
+              <li key={c.instanceId}>
+                {c.card.name}
+                {c.card.power !== undefined ? ` ${c.card.power}/${c.card.toughness}` : ""}
+                {c.tapped ? " (tapped)" : ""}
+                {c.summoningSick && c.card.types.includes("Creature") ? " (summoning sick)" : ""}
+              </li>
+            ))}
+          </ul>
+
           <h3>Opponent</h3>
           <p>
             Life: {game.opponent.life} | Hand: {game.opponent.handCount} cards | Library:{" "}
             {game.opponent.libraryCount} cards
           </p>
+          <h3>Opponent's battlefield ({game.opponent.battlefield.length})</h3>
+          <ul>
+            {game.opponent.battlefield.map((c) => (
+              <li key={c.instanceId}>
+                {c.card.name}
+                {c.card.power !== undefined ? ` ${c.card.power}/${c.card.toughness}` : ""}
+                {c.tapped ? " (tapped)" : ""}
+                {c.summoningSick && c.card.types.includes("Creature") ? " (summoning sick)" : ""}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>

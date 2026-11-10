@@ -6,6 +6,7 @@ import type { GameState } from "../../shared/src/types";
 import { loadCardCache } from "./cards/cardCache";
 import { validateDeck } from "./cards/validateDeck";
 import { createGame, toView } from "./game/createGame";
+import { processCommand, type GameCommand } from "./game/engine";
 import { keepHand, takeMulligan } from "./game/mulligan";
 import { MatchmakingQueue, type QueueEntry } from "./matchmaking";
 
@@ -33,6 +34,29 @@ function sendState(game: GameState) {
 /** Tells one player their action was refused, and why. */
 function sendError(socketId: string, message: string) {
   io.to(socketId).emit("game_error", { message });
+}
+
+/**
+ * Runs a command against the game the socket is in. Commands are handled
+ * one at a time (this code is synchronous), so two players acting at the
+ * same moment can never interleave.
+ */
+function applyCommand(socketId: string, command: GameCommand) {
+  const gameId = gameBySocket.get(socketId);
+  const game = gameId ? games.get(gameId) : undefined;
+  if (!game) {
+    sendError(socketId, "You're not in a game.");
+    return;
+  }
+
+  const result = processCommand(game, command);
+  if (!result.ok) {
+    sendError(socketId, result.reason);
+    return;
+  }
+
+  games.set(game.gameId, result.state);
+  sendState(result.state);
 }
 
 function startGame(a: QueueEntry, b: QueueEntry) {
@@ -124,6 +148,51 @@ io.on("connection", (socket) => {
     if (game.status === "mulligan" && result.state.status === "in_progress") {
       io.to(game.gameId).emit("game_start", { gameId: game.gameId });
     }
+  });
+
+  socket.on("pass_priority", () => {
+    applyCommand(socket.id, { type: "PASS_PRIORITY", playerId: socket.id });
+  });
+
+  socket.on("play_land", (payload: unknown) => {
+    const cardInstanceId = (payload as { cardInstanceId?: unknown } | null)?.cardInstanceId;
+    if (typeof cardInstanceId !== "string") {
+      sendError(socket.id, "Invalid card.");
+      return;
+    }
+    applyCommand(socket.id, { type: "PLAY_LAND", playerId: socket.id, cardInstanceId });
+  });
+
+  socket.on("cast_spell", (payload: unknown) => {
+    const cardInstanceId = (payload as { cardInstanceId?: unknown } | null)?.cardInstanceId;
+    if (typeof cardInstanceId !== "string") {
+      sendError(socket.id, "Invalid card.");
+      return;
+    }
+    applyCommand(socket.id, { type: "CAST_SPELL", playerId: socket.id, cardInstanceId });
+  });
+
+  // Dev-only testing shortcut: both players pass, so one click advances a step.
+  socket.on("debug_pass_both", () => {
+    if (process.env.NODE_ENV === "production") return;
+
+    const gameId = gameBySocket.get(socket.id);
+    const game = gameId ? games.get(gameId) : undefined;
+    if (!game || game.status !== "in_progress") return;
+
+    let state = game;
+    for (let i = 0; i < 2; i++) {
+      const result = processCommand(state, {
+        type: "PASS_PRIORITY",
+        playerId: state.priorityPlayerId,
+      });
+      if (!result.ok) break;
+      state = result.state;
+      if (state.consecutivePasses === 0) break; // the step advanced or the stack resolved
+    }
+
+    games.set(game.gameId, state);
+    sendState(state);
   });
 
   socket.on("disconnect", () => {

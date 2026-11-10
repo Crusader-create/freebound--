@@ -20,6 +20,7 @@
 
 import type { GameState, Player } from "../../../shared/src/types";
 import { OPENING_HAND_SIZE, shuffle } from "./createGame";
+import { startFirstTurn } from "./turns";
 
 /** Mulliganing past this would leave a 0-card hand, so we stop here. */
 export const MAX_MULLIGANS = 6;
@@ -91,9 +92,9 @@ export function keepHand(state: GameState, playerId: string): MulliganResult {
     keptHand: true,
   });
 
-  // Once both players have kept, the game itself begins.
+  // Once both players have kept, the game itself begins with turn 1.
   if (next.players.every((p) => p.keptHand)) {
-    next = { ...next, status: "in_progress" };
+    next = startFirstTurn({ ...next, status: "in_progress" });
   }
 
   return { ok: true, state: next };
