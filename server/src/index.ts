@@ -2,10 +2,11 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { parseDecklist } from "../../shared/src/deckParser";
-import type { GameState } from "../../shared/src/types";
+import type { GameState, Target } from "../../shared/src/types";
 import { loadCardCache } from "./cards/cardCache";
 import { validateDeck } from "./cards/validateDeck";
 import { createGame, toView } from "./game/createGame";
+import { isTarget } from "./game/effects";
 import { processCommand, type GameCommand } from "./game/engine";
 import { keepHand, takeMulligan } from "./game/mulligan";
 import { MatchmakingQueue, type QueueEntry } from "./matchmaking";
@@ -169,7 +170,17 @@ io.on("connection", (socket) => {
       sendError(socket.id, "Invalid card.");
       return;
     }
-    applyCommand(socket.id, { type: "CAST_SPELL", playerId: socket.id, cardInstanceId });
+    const rawTargets = (payload as { targets?: unknown } | null)?.targets ?? [];
+    if (!Array.isArray(rawTargets) || !rawTargets.every(isTarget)) {
+      sendError(socket.id, "Invalid targets.");
+      return;
+    }
+    applyCommand(socket.id, {
+      type: "CAST_SPELL",
+      playerId: socket.id,
+      cardInstanceId,
+      targets: rawTargets as Target[],
+    });
   });
 
   // Dev-only testing shortcut: both players pass, so one click advances a step.

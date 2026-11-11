@@ -91,13 +91,21 @@ function drawStep(state: GameState): GameState {
   });
 }
 
-/** Cleanup step: damage wears off, then the next player's turn begins. */
+/**
+ * Cleanup step: damage and "until end of turn" effects wear off at the same
+ * moment, then the next player's turn begins.
+ */
 function cleanupStep(state: GameState): GameState {
   const cleaned = state.players.reduce(
     (current, player) =>
       replacePlayer(current, {
         ...player,
-        battlefield: player.battlefield.map((card) => ({ ...card, damageMarked: 0 })),
+        battlefield: player.battlefield.map((card) => ({
+          ...card,
+          damageMarked: 0,
+          powerModifier: 0,
+          toughnessModifier: 0,
+        })),
       }),
     { ...state, phase: "cleanup" as Phase }
   );

@@ -62,6 +62,29 @@ export const SHOCK = fakeCard("Test Shock", ["Instant"], {
   oracleText: "Test Shock deals 2 damage to any target.",
 });
 
+export const PLAINS = fakeCard("Plains", ["Basic", "Land"], {
+  oracleText: "({T}: Add {W}.)",
+});
+export const SWAMP = fakeCard("Swamp", ["Basic", "Land"], {
+  oracleText: "({T}: Add {B}.)",
+});
+export const GIANT_GROWTH = fakeCard("Test Giant Growth", ["Instant"], {
+  manaCost: "{G}",
+  oracleText: "Target creature gets +3/+3 until end of turn.",
+});
+export const STAB = fakeCard("Test Stab", ["Instant"], {
+  manaCost: "{B}",
+  oracleText: "Target creature gets -2/-2 until end of turn.",
+});
+export const SUDDEN_STRIKE = fakeCard("Test Sudden Strike", ["Instant"], {
+  manaCost: "{1}{W}",
+  oracleText: "Destroy target attacking or blocking creature.",
+});
+export const FELL = fakeCard("Test Fell", ["Sorcery"], {
+  manaCost: "{1}{B}",
+  oracleText: "Destroy target creature.",
+});
+
 /** 24 Forests and 36 Bears: 60 cards. */
 export function fakeDeck(): ValidatedCard[] {
   return [
@@ -141,6 +164,8 @@ export function makePermanent(
     tapped: false,
     summoningSick: false,
     damageMarked: 0,
+    powerModifier: 0,
+    toughnessModifier: 0,
     attacking: false,
     ...overrides,
   };

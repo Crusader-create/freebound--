@@ -4,11 +4,13 @@
  * Resolving the stack. Convention: the TOP of the stack is the LAST element
  * of GameState.stack, so casting is a push and resolving is a pop.
  *
- * Right now this resolves permanent spells (creatures, artifacts, and so
- * on), which enter the battlefield. Instants and sorceries can't be cast
- * yet; if one ever got here it would just go to its owner's graveyard,
- * because spell effects arrive next week. Triggered abilities arrive in
- * Week 6.
+ *   - Permanent spells (creatures, etc.) enter the battlefield.
+ *   - Instants and sorceries apply their effect, then go to their owner's
+ *     graveyard. If the target is no longer legal by the time the spell
+ *     resolves, the spell "fizzles": it does nothing, but still goes to the
+ *     graveyard.
+ *
+ * Triggered abilities arrive in Week 6.
  */
 
 import type {
@@ -17,6 +19,7 @@ import type {
   GameState,
   StackObject,
 } from "../../../shared/src/types";
+import { applyEffect, effectTargetSpec, getSpellEffect, targetProblem } from "./effects";
 import { getPlayer, replacePlayer } from "./stateHelpers";
 
 const PERMANENT_TYPES = ["Creature", "Artifact", "Enchantment", "Planeswalker", "Battle"];
@@ -38,6 +41,8 @@ function resolveSpell(state: GameState, spell: StackObject): GameState {
       // has controlled it since the start of one of their turns.
       summoningSick: card.card.types.includes("Creature"),
       damageMarked: 0,
+      powerModifier: 0,
+      toughnessModifier: 0,
       attacking: false,
     };
     return replacePlayer(state, {
@@ -46,9 +51,17 @@ function resolveSpell(state: GameState, spell: StackObject): GameState {
     });
   }
 
-  // Instants and sorceries: effects aren't implemented yet.
-  const owner = getPlayer(state, card.ownerId);
-  return replacePlayer(state, { ...owner, graveyard: [...owner.graveyard, card] });
+  // Instant or sorcery: apply the effect if the target is still legal.
+  let next = state;
+  const effect = getSpellEffect(card.card);
+  const target = spell.targets[0];
+  if (effect && target && targetProblem(next, effectTargetSpec(effect), target) === null) {
+    next = applyEffect(next, effect, target);
+  }
+  // (If the target was illegal the spell fizzles: no effect, same graveyard.)
+
+  const owner = getPlayer(next, card.ownerId);
+  return replacePlayer(next, { ...owner, graveyard: [...owner.graveyard, card] });
 }
 
 /** Removes the top object from the stack and resolves it. */

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
-import type { GameStateView } from "../../shared/src/types";
+import type { BattlefieldCard, GameStateView, Target } from "../../shared/src/types";
 
 const socket = io("http://localhost:3001");
 
@@ -24,11 +24,37 @@ function phaseLabel(phase: string): string {
   return phase.replace(/_/g, " ");
 }
 
+const isCreature = (c: BattlefieldCard) => c.card.types.includes("Creature");
+
+function statsOf(c: BattlefieldCard): string {
+  if (!isCreature(c)) return "";
+  const power = (c.card.power ?? 0) + c.powerModifier;
+  const toughness = (c.card.toughness ?? 0) + c.toughnessModifier;
+  return ` ${power}/${toughness}`;
+}
+
+function Battlefield({ cards }: { cards: BattlefieldCard[] }) {
+  return (
+    <ul>
+      {cards.map((c) => (
+        <li key={c.instanceId}>
+          {c.card.name}
+          {statsOf(c)}
+          {c.damageMarked > 0 ? ` (damage ${c.damageMarked})` : ""}
+          {c.tapped ? " (tapped)" : ""}
+          {c.summoningSick && isCreature(c) ? " (summoning sick)" : ""}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function App() {
   const [status, setStatus] = useState("connecting...");
   const [deckText, setDeckText] = useState("");
   const [errors, setErrors] = useState<DeckError[]>([]);
   const [game, setGame] = useState<GameStateView | null>(null);
+  const [casting, setCasting] = useState<{ cardInstanceId: string; name: string } | null>(null);
 
   useEffect(() => {
     const onConnect = () => setStatus("connected: " + socket.id);
@@ -70,21 +96,33 @@ export default function App() {
   const myPriority = game !== null && game.priorityPlayerId === game.you.id;
   const myTurn = game !== null && game.activePlayerId === game.you.id;
   const inMainPhase = game !== null && (game.phase === "main1" || game.phase === "main2");
-  const canPlayLand =
-    game !== null &&
-    game.status === "in_progress" &&
-    myTurn &&
-    myPriority &&
-    inMainPhase &&
-    game.stack.length === 0 &&
-    game.you.landsPlayedThisTurn < 1;
-  const canCastCreature =
+  const sorcerySpeedOk =
     game !== null &&
     game.status === "in_progress" &&
     myTurn &&
     myPriority &&
     inMainPhase &&
     game.stack.length === 0;
+  const instantSpeedOk = game !== null && game.status === "in_progress" && myPriority;
+  const canPlayLand = game !== null && sorcerySpeedOk && game.you.landsPlayedThisTurn < 1;
+
+  function chooseTarget(target: Target) {
+    if (!casting) return;
+    socket.emit("cast_spell", { cardInstanceId: casting.cardInstanceId, targets: [target] });
+    setCasting(null);
+  }
+
+  function describeTarget(target: Target): string {
+    if (!game) return "";
+    if (target.kind === "player") {
+      return target.playerId === game.you.id ? "you" : "opponent";
+    }
+    if (target.kind === "permanent") {
+      const all = [...game.you.battlefield, ...game.opponent.battlefield];
+      return all.find((p) => p.instanceId === target.instanceId)?.card.name ?? "a creature that's gone";
+    }
+    return "a spell";
+  }
 
   return (
     <div style={{ padding: 40, fontFamily: "sans-serif", maxWidth: 800 }}>
@@ -179,6 +217,9 @@ export default function App() {
                       <li key={item.id}>
                         {item.source.card.name} - cast by{" "}
                         {item.controllerId === game.you.id ? "you" : "opponent"}
+                        {item.targets.length > 0
+                          ? `, targeting ${item.targets.map(describeTarget).join(", ")}`
+                          : ""}
                         {i === 0 ? " (top, resolves next)" : ""}
                       </li>
                     ))}
@@ -189,9 +230,46 @@ export default function App() {
 
           {game.status === "finished" && (
             <p>
-              <strong>Game over.</strong> {game.winnerId === game.you.id ? "You win" : "You lose"}{" "}
+              <strong>Game over.</strong>{" "}
+              {game.winnerId === null
+                ? "Draw"
+                : game.winnerId === game.you.id
+                  ? "You win"
+                  : "You lose"}{" "}
               ({game.endReason})
             </p>
+          )}
+
+          {casting && (
+            <div style={{ margin: "16px 0", padding: 12, border: "1px solid #c80" }}>
+              <p>
+                <strong>Choose a target for {casting.name}:</strong>
+              </p>
+              <button onClick={() => chooseTarget({ kind: "player", playerId: game.you.id })}>
+                You
+              </button>{" "}
+              <button onClick={() => chooseTarget({ kind: "player", playerId: game.opponent.id })}>
+                Opponent
+              </button>
+              <ul>
+                {[
+                  ...game.you.battlefield.filter(isCreature).map((c) => ({ c, owner: "yours" })),
+                  ...game.opponent.battlefield
+                    .filter(isCreature)
+                    .map((c) => ({ c, owner: "opponent's" })),
+                ].map(({ c, owner }) => (
+                  <li key={c.instanceId}>
+                    <button
+                      onClick={() => chooseTarget({ kind: "permanent", instanceId: c.instanceId })}
+                    >
+                      {c.card.name}
+                      {statsOf(c)} ({owner})
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <button onClick={() => setCasting(null)}>Cancel</button>
+            </div>
           )}
 
           <p>
@@ -201,40 +279,54 @@ export default function App() {
 
           <h3>Your hand ({game.you.handCount})</h3>
           <ul>
-            {game.you.hand?.map((c) => (
-              <li key={c.instanceId}>
-                {c.card.name} {c.card.manaCost}{" "}
-                {c.card.types.includes("Land") && (
-                  <button
-                    disabled={!canPlayLand}
-                    onClick={() => socket.emit("play_land", { cardInstanceId: c.instanceId })}
-                  >
-                    Play land
-                  </button>
-                )}
-                {c.card.types.includes("Creature") && (
-                  <button
-                    disabled={!canCastCreature}
-                    onClick={() => socket.emit("cast_spell", { cardInstanceId: c.instanceId })}
-                  >
-                    Cast
-                  </button>
-                )}
-              </li>
-            ))}
+            {game.you.hand?.map((c) => {
+              const types = c.card.types;
+              return (
+                <li key={c.instanceId}>
+                  {c.card.name} {c.card.manaCost}{" "}
+                  {types.includes("Land") && (
+                    <button
+                      disabled={!canPlayLand}
+                      onClick={() => socket.emit("play_land", { cardInstanceId: c.instanceId })}
+                    >
+                      Play land
+                    </button>
+                  )}
+                  {types.includes("Creature") && (
+                    <button
+                      disabled={!sorcerySpeedOk}
+                      onClick={() => socket.emit("cast_spell", { cardInstanceId: c.instanceId })}
+                    >
+                      Cast
+                    </button>
+                  )}
+                  {types.includes("Instant") && (
+                    <button
+                      disabled={!instantSpeedOk}
+                      onClick={() => setCasting({ cardInstanceId: c.instanceId, name: c.card.name })}
+                    >
+                      Cast...
+                    </button>
+                  )}
+                  {types.includes("Sorcery") && (
+                    <button
+                      disabled={!sorcerySpeedOk}
+                      onClick={() => setCasting({ cardInstanceId: c.instanceId, name: c.card.name })}
+                    >
+                      Cast...
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
 
           <h3>Your battlefield ({game.you.battlefield.length})</h3>
-          <ul>
-            {game.you.battlefield.map((c) => (
-              <li key={c.instanceId}>
-                {c.card.name}
-                {c.card.power !== undefined ? ` ${c.card.power}/${c.card.toughness}` : ""}
-                {c.tapped ? " (tapped)" : ""}
-                {c.summoningSick && c.card.types.includes("Creature") ? " (summoning sick)" : ""}
-              </li>
-            ))}
-          </ul>
+          <Battlefield cards={game.you.battlefield} />
+          <p>
+            Your graveyard ({game.you.graveyard.length}):{" "}
+            {game.you.graveyard.map((c) => c.card.name).join(", ") || "empty"}
+          </p>
 
           <h3>Opponent</h3>
           <p>
@@ -242,16 +334,11 @@ export default function App() {
             {game.opponent.libraryCount} cards
           </p>
           <h3>Opponent's battlefield ({game.opponent.battlefield.length})</h3>
-          <ul>
-            {game.opponent.battlefield.map((c) => (
-              <li key={c.instanceId}>
-                {c.card.name}
-                {c.card.power !== undefined ? ` ${c.card.power}/${c.card.toughness}` : ""}
-                {c.tapped ? " (tapped)" : ""}
-                {c.summoningSick && c.card.types.includes("Creature") ? " (summoning sick)" : ""}
-              </li>
-            ))}
-          </ul>
+          <Battlefield cards={game.opponent.battlefield} />
+          <p>
+            Opponent's graveyard ({game.opponent.graveyard.length}):{" "}
+            {game.opponent.graveyard.map((c) => c.card.name).join(", ") || "empty"}
+          </p>
         </div>
       )}
     </div>

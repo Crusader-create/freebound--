@@ -53,6 +53,8 @@ export type BattlefieldCard = CardInstance & {
   tapped: boolean;
   summoningSick: boolean; // true until controller's next turn begins
   damageMarked: number; // cleared at end of turn
+  powerModifier: number; // "until end of turn" bonus/penalty, cleared at cleanup
+  toughnessModifier: number; // same; effective toughness = card.toughness + this
   attacking: boolean;
   blockingInstanceId?: string; // which attacker this creature is blocking
 };

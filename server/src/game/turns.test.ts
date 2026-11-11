@@ -195,6 +195,8 @@ describe("the untap step", () => {
       tapped: true,
       summoningSick: true,
       damageMarked: 0,
+      powerModifier: 0,
+      toughnessModifier: 0,
       attacking: false,
     };
     const rigged = replacePlayer(start, {
