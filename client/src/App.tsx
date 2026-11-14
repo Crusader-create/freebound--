@@ -43,6 +43,9 @@ function Battlefield({ cards }: { cards: BattlefieldCard[] }) {
           {c.damageMarked > 0 ? ` (damage ${c.damageMarked})` : ""}
           {c.tapped ? " (tapped)" : ""}
           {c.summoningSick && isCreature(c) ? " (summoning sick)" : ""}
+          {c.attacking ? " (ATTACKING)" : ""}
+          {c.blockedBy !== undefined ? " (blocked)" : ""}
+          {c.blockingInstanceId !== undefined ? " (BLOCKING)" : ""}
         </li>
       ))}
     </ul>
@@ -55,6 +58,9 @@ export default function App() {
   const [errors, setErrors] = useState<DeckError[]>([]);
   const [game, setGame] = useState<GameStateView | null>(null);
   const [casting, setCasting] = useState<{ cardInstanceId: string; name: string } | null>(null);
+  const [selectedAttackers, setSelectedAttackers] = useState<string[]>([]);
+  const [blockChoices, setBlockChoices] = useState<Record<string, string>>({});
+  const [discardChoices, setDiscardChoices] = useState<string[]>([]);
 
   useEffect(() => {
     const onConnect = () => setStatus("connected: " + socket.id);
@@ -96,20 +102,50 @@ export default function App() {
   const myPriority = game !== null && game.priorityPlayerId === game.you.id;
   const myTurn = game !== null && game.activePlayerId === game.you.id;
   const inMainPhase = game !== null && (game.phase === "main1" || game.phase === "main2");
-  const sorcerySpeedOk =
-    game !== null &&
-    game.status === "in_progress" &&
-    myTurn &&
-    myPriority &&
-    inMainPhase &&
-    game.stack.length === 0;
-  const instantSpeedOk = game !== null && game.status === "in_progress" && myPriority;
+  const free = game !== null && game.status === "in_progress" && game.awaiting === null;
+  const sorcerySpeedOk = game !== null && free && myTurn && myPriority && inMainPhase && game.stack.length === 0;
+  const instantSpeedOk = free && myPriority;
   const canPlayLand = game !== null && sorcerySpeedOk && game.you.landsPlayedThisTurn < 1;
+  const declaringAttackers = game !== null && game.awaiting === "attackers" && myTurn;
+  const declaringBlockers = game !== null && game.awaiting === "blockers" && myPriority;
+  const choosingTriggerTarget = game !== null && game.awaiting === "trigger_target" && myPriority;
+  const discarding = game !== null && game.awaiting === "discard" && myPriority;
+  const discardNeeded = game !== null ? Math.max(0, game.you.handCount - 7) : 0;
 
   function chooseTarget(target: Target) {
     if (!casting) return;
     socket.emit("cast_spell", { cardInstanceId: casting.cardInstanceId, targets: [target] });
     setCasting(null);
+  }
+
+  function toggleAttacker(id: string) {
+    setSelectedAttackers((current) =>
+      current.includes(id) ? current.filter((x) => x !== id) : [...current, id]
+    );
+  }
+
+  function toggleDiscard(id: string) {
+    setDiscardChoices((current) =>
+      current.includes(id) ? current.filter((x) => x !== id) : [...current, id]
+    );
+  }
+
+  function submitAttackers() {
+    socket.emit("declare_attackers", { attackerIds: selectedAttackers });
+    setSelectedAttackers([]);
+  }
+
+  function submitBlockers() {
+    const blocks = Object.entries(blockChoices)
+      .filter(([, attackerId]) => attackerId !== "")
+      .map(([blockerId, attackerId]) => ({ blockerId, attackerId }));
+    socket.emit("declare_blockers", { blocks });
+    setBlockChoices({});
+  }
+
+  function submitDiscard() {
+    socket.emit("discard", { cardInstanceIds: discardChoices });
+    setDiscardChoices([]);
   }
 
   function describeTarget(target: Target): string {
@@ -122,6 +158,32 @@ export default function App() {
       return all.find((p) => p.instanceId === target.instanceId)?.card.name ?? "a creature that's gone";
     }
     return "a spell";
+  }
+
+  /** Buttons for every legal "any target": both players and all creatures. */
+  function TargetButtons({ onPick }: { onPick: (t: Target) => void }) {
+    if (!game) return null;
+    return (
+      <>
+        <button onClick={() => onPick({ kind: "player", playerId: game.you.id })}>You</button>{" "}
+        <button onClick={() => onPick({ kind: "player", playerId: game.opponent.id })}>
+          Opponent
+        </button>
+        <ul>
+          {[
+            ...game.you.battlefield.filter(isCreature).map((c) => ({ c, owner: "yours" })),
+            ...game.opponent.battlefield.filter(isCreature).map((c) => ({ c, owner: "opponent's" })),
+          ].map(({ c, owner }) => (
+            <li key={c.instanceId}>
+              <button onClick={() => onPick({ kind: "permanent", instanceId: c.instanceId })}>
+                {c.card.name}
+                {statsOf(c)} ({owner})
+              </button>
+            </li>
+          ))}
+        </ul>
+      </>
+    );
   }
 
   return (
@@ -195,8 +257,24 @@ export default function App() {
                 <strong>Turn {game.turnNumber}</strong> - {myTurn ? "your turn" : "opponent's turn"}{" "}
                 - step: <strong>{phaseLabel(game.phase)}</strong>
               </p>
-              <p>{myPriority ? "You have priority." : "Opponent has priority."}</p>
-              <button disabled={!myPriority} onClick={() => socket.emit("pass_priority")}>
+              <p>
+                {game.awaiting === "attackers" &&
+                  (myTurn ? "Declare your attackers." : "Opponent is declaring attackers...")}
+                {game.awaiting === "blockers" &&
+                  (myPriority ? "Declare your blockers." : "Opponent is declaring blockers...")}
+                {game.awaiting === "trigger_target" &&
+                  (myPriority
+                    ? "Choose a target for your triggered ability."
+                    : "Opponent is choosing a target...")}
+                {game.awaiting === "discard" &&
+                  (myPriority ? "Discard down to 7 cards." : "Opponent is discarding...")}
+                {game.awaiting === null &&
+                  (myPriority ? "You have priority." : "Opponent has priority.")}
+              </p>
+              <button
+                disabled={!myPriority || game.awaiting !== null}
+                onClick={() => socket.emit("pass_priority")}
+              >
                 Pass priority
               </button>
               {import.meta.env.DEV && (
@@ -204,6 +282,14 @@ export default function App() {
                   Pass for both players (dev only)
                 </button>
               )}
+              <button
+                style={{ marginLeft: 8, color: "crimson" }}
+                onClick={() => {
+                  if (window.confirm("Concede the game?")) socket.emit("concede");
+                }}
+              >
+                Concede
+              </button>
 
               <h3>Stack ({game.stack.length})</h3>
               {game.stack.length === 0 ? (
@@ -215,8 +301,10 @@ export default function App() {
                     .reverse()
                     .map((item, i) => (
                       <li key={item.id}>
-                        {item.source.card.name} - cast by{" "}
-                        {item.controllerId === game.you.id ? "you" : "opponent"}
+                        {item.kind === "triggered_ability"
+                          ? `Ability - ${item.description ?? item.source.card.name}`
+                          : item.source.card.name}{" "}
+                        - {item.controllerId === game.you.id ? "yours" : "opponent's"}
                         {item.targets.length > 0
                           ? `, targeting ${item.targets.map(describeTarget).join(", ")}`
                           : ""}
@@ -225,6 +313,98 @@ export default function App() {
                     ))}
                 </ul>
               )}
+            </div>
+          )}
+
+          {declaringAttackers && (
+            <div style={{ margin: "16px 0", padding: 12, border: "1px solid #08c" }}>
+              <p>
+                <strong>Choose your attackers</strong> (or none):
+              </p>
+              {game.you.battlefield.filter((c) => isCreature(c) && !c.tapped).map((c) => (
+                <label key={c.instanceId} style={{ display: "block" }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedAttackers.includes(c.instanceId)}
+                    onChange={() => toggleAttacker(c.instanceId)}
+                  />{" "}
+                  {c.card.name}
+                  {statsOf(c)}
+                  {c.summoningSick ? " (summoning sick)" : ""}
+                </label>
+              ))}
+              <button style={{ marginTop: 8 }} onClick={submitAttackers}>
+                Declare attackers
+              </button>
+            </div>
+          )}
+
+          {declaringBlockers && (
+            <div style={{ margin: "16px 0", padding: 12, border: "1px solid #08c" }}>
+              <p>
+                <strong>Choose your blockers</strong> (or none):
+              </p>
+              {game.you.battlefield.filter((c) => isCreature(c) && !c.tapped).map((blocker) => (
+                <div key={blocker.instanceId} style={{ marginBottom: 4 }}>
+                  {blocker.card.name}
+                  {statsOf(blocker)} blocks{" "}
+                  <select
+                    value={blockChoices[blocker.instanceId] ?? ""}
+                    onChange={(e) =>
+                      setBlockChoices({ ...blockChoices, [blocker.instanceId]: e.target.value })
+                    }
+                  >
+                    <option value="">(no block)</option>
+                    {game.opponent.battlefield
+                      .filter((a) => a.attacking)
+                      .map((a) => (
+                        <option key={a.instanceId} value={a.instanceId}>
+                          {a.card.name}
+                          {statsOf(a)}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              ))}
+              <button style={{ marginTop: 8 }} onClick={submitBlockers}>
+                Declare blockers
+              </button>
+            </div>
+          )}
+
+          {choosingTriggerTarget && (
+            <div style={{ margin: "16px 0", padding: 12, border: "1px solid #c80" }}>
+              <p>
+                <strong>
+                  Choose a target for {game.pendingTriggers[0]?.description ?? "the ability"}:
+                </strong>
+              </p>
+              <TargetButtons onPick={(t) => socket.emit("choose_trigger_target", { target: t })} />
+            </div>
+          )}
+
+          {discarding && (
+            <div style={{ margin: "16px 0", padding: 12, border: "1px solid #c80" }}>
+              <p>
+                <strong>Discard {discardNeeded} card(s)</strong> ({discardChoices.length} chosen):
+              </p>
+              {game.you.hand?.map((c) => (
+                <label key={c.instanceId} style={{ display: "block" }}>
+                  <input
+                    type="checkbox"
+                    checked={discardChoices.includes(c.instanceId)}
+                    onChange={() => toggleDiscard(c.instanceId)}
+                  />{" "}
+                  {c.card.name} {c.card.manaCost}
+                </label>
+              ))}
+              <button
+                style={{ marginTop: 8 }}
+                disabled={discardChoices.length !== discardNeeded}
+                onClick={submitDiscard}
+              >
+                Discard
+              </button>
             </div>
           )}
 
@@ -245,29 +425,7 @@ export default function App() {
               <p>
                 <strong>Choose a target for {casting.name}:</strong>
               </p>
-              <button onClick={() => chooseTarget({ kind: "player", playerId: game.you.id })}>
-                You
-              </button>{" "}
-              <button onClick={() => chooseTarget({ kind: "player", playerId: game.opponent.id })}>
-                Opponent
-              </button>
-              <ul>
-                {[
-                  ...game.you.battlefield.filter(isCreature).map((c) => ({ c, owner: "yours" })),
-                  ...game.opponent.battlefield
-                    .filter(isCreature)
-                    .map((c) => ({ c, owner: "opponent's" })),
-                ].map(({ c, owner }) => (
-                  <li key={c.instanceId}>
-                    <button
-                      onClick={() => chooseTarget({ kind: "permanent", instanceId: c.instanceId })}
-                    >
-                      {c.card.name}
-                      {statsOf(c)} ({owner})
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <TargetButtons onPick={chooseTarget} />
               <button onClick={() => setCasting(null)}>Cancel</button>
             </div>
           )}

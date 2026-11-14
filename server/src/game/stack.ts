@@ -9,10 +9,13 @@
  *     graveyard. If the target is no longer legal by the time the spell
  *     resolves, the spell "fizzles": it does nothing, but still goes to the
  *     graveyard.
- *
- * Triggered abilities arrive in Week 6.
+ *   - When a creature enters the battlefield, its "enters" trigger (if any)
+ *     is QUEUED in pendingTriggers. It goes on the stack later, after
+ *     state-based actions (see engine.ts), not immediately.
+ *   - Triggered abilities resolve through triggers.ts.
  */
 
+import { randomUUID } from "crypto";
 import type {
   BattlefieldCard,
   CardInstance,
@@ -21,6 +24,12 @@ import type {
 } from "../../../shared/src/types";
 import { applyEffect, effectTargetSpec, getSpellEffect, targetProblem } from "./effects";
 import { getPlayer, replacePlayer } from "./stateHelpers";
+import {
+  describeTrigger,
+  getEtbTrigger,
+  resolveTrigger,
+  triggerNeedsTarget,
+} from "./triggers";
 
 const PERMANENT_TYPES = ["Creature", "Artifact", "Enchantment", "Planeswalker", "Battle"];
 
@@ -45,10 +54,27 @@ function resolveSpell(state: GameState, spell: StackObject): GameState {
       toughnessModifier: 0,
       attacking: false,
     };
-    return replacePlayer(state, {
+    const entered = replacePlayer(state, {
       ...controller,
       battlefield: [...controller.battlefield, permanent],
     });
+
+    // The creature's "enters" trigger, if it has one, is queued: it will be
+    // put on the stack after state-based actions, not resolved right now.
+    const trigger = getEtbTrigger(card.card);
+    if (!trigger) return entered;
+    return {
+      ...entered,
+      pendingTriggers: [
+        ...entered.pendingTriggers,
+        {
+          controllerId: controller.id,
+          source: card,
+          description: describeTrigger(card.card, trigger),
+          needsTarget: triggerNeedsTarget(trigger),
+        },
+      ],
+    };
   }
 
   // Instant or sorcery: apply the effect if the target is still legal.
@@ -72,5 +98,5 @@ export function resolveTopOfStack(state: GameState): GameState {
   const withoutTop: GameState = { ...state, stack: state.stack.slice(0, -1) };
 
   if (top.kind === "spell") return resolveSpell(withoutTop, top);
-  return withoutTop; // triggered abilities: Week 6
+  return resolveTrigger(withoutTop, top, randomUUID);
 }

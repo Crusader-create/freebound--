@@ -6,8 +6,14 @@
  * GameState or the reason it was refused. The socket layer never changes
  * game state directly.
  *
- * After every successful command, state-based actions run (creatures with
- * lethal damage die, players at 0 life lose).
+ * After every successful command:
+ *   1. State-based actions run (creatures with lethal damage die, players at
+ *      0 life lose).
+ *   2. Any triggered abilities waiting in pendingTriggers go on the stack.
+ *      A trigger that needs a target first waits for its controller to
+ *      choose one (awaiting = "trigger_target").
+ * This is the "detect, queue, then put on the stack at the right moment"
+ * order: a trigger never resolves the instant it triggers.
  *
  * Mulligan decisions live in mulligan.ts and will be folded into this
  * command boundary later.
@@ -20,18 +26,28 @@ import type {
   StackObject,
   Target,
 } from "../../../shared/src/types";
+import {
+  declareAttackers,
+  declareBlockers,
+  type BlockAssignment,
+} from "./combat";
 import { effectTargetSpec, getSpellEffect, targetProblem } from "./effects";
 import { parseManaCost, planPayment } from "./mana";
 import { applyStateBasedActions } from "./sba";
-import { findPlayer, replacePlayer } from "./stateHelpers";
-import { passPriority } from "./turns";
+import { findPlayer, getPlayer, opponentOf, replacePlayer } from "./stateHelpers";
+import { finishCleanup, MAX_HAND_SIZE, passPriority } from "./turns";
 
 export const MAX_LAND_DROPS = 1;
 
 export type GameCommand =
   | { type: "PASS_PRIORITY"; playerId: string }
   | { type: "PLAY_LAND"; playerId: string; cardInstanceId: string }
-  | { type: "CAST_SPELL"; playerId: string; cardInstanceId: string; targets?: Target[] };
+  | { type: "CAST_SPELL"; playerId: string; cardInstanceId: string; targets?: Target[] }
+  | { type: "DECLARE_ATTACKERS"; playerId: string; attackerIds: string[] }
+  | { type: "DECLARE_BLOCKERS"; playerId: string; blocks: BlockAssignment[] }
+  | { type: "CHOOSE_TRIGGER_TARGET"; playerId: string; target: Target }
+  | { type: "DISCARD"; playerId: string; cardInstanceIds: string[] }
+  | { type: "CONCEDE"; playerId: string };
 
 export type CommandResult =
   | { ok: true; state: GameState }
@@ -41,12 +57,30 @@ function fail(reason: string): CommandResult {
   return { ok: false, reason };
 }
 
+/** Why a normal action can't happen while the game waits on a decision. */
+function awaitingReason(state: GameState): string | null {
+  switch (state.awaiting) {
+    case "attackers":
+      return "Declare attackers first.";
+    case "blockers":
+      return "Declare blockers first.";
+    case "trigger_target":
+      return "A triggered ability needs a target first.";
+    case "discard":
+      return "Discard down to hand size first.";
+    default:
+      return null;
+  }
+}
+
 function playLand(
   state: GameState,
   playerId: string,
   cardInstanceId: string
 ): CommandResult {
   if (state.status !== "in_progress") return fail("The game isn't in progress.");
+  const waiting = awaitingReason(state);
+  if (waiting) return fail(waiting);
 
   const player = findPlayer(state, playerId);
   if (!player) return fail("You're not in this game.");
@@ -108,6 +142,8 @@ function castSpell(
   targets: Target[]
 ): CommandResult {
   if (state.status !== "in_progress") return fail("The game isn't in progress.");
+  const waiting = awaitingReason(state);
+  if (waiting) return fail(waiting);
 
   const player = findPlayer(state, playerId);
   if (!player) return fail("You're not in this game.");
@@ -190,6 +226,81 @@ function castSpell(
   };
 }
 
+/**
+ * The controller of the first pending trigger picks its target. The trigger
+ * then goes on the stack and priority returns to the active player.
+ */
+function chooseTriggerTarget(state: GameState, playerId: string, target: Target): CommandResult {
+  if (state.awaiting !== "trigger_target") return fail("Nothing is waiting for a target.");
+  const pending = state.pendingTriggers[0];
+  if (!pending) return fail("Nothing is waiting for a target.");
+  if (pending.controllerId !== playerId) return fail("That isn't your ability to target.");
+
+  const problem = targetProblem(state, "any", target);
+  if (problem) return fail(problem);
+
+  const ability: StackObject = {
+    id: randomUUID(),
+    controllerId: playerId,
+    source: pending.source,
+    kind: "triggered_ability",
+    targets: [target],
+    description: pending.description,
+  };
+
+  return {
+    ok: true,
+    state: {
+      ...state,
+      stack: [...state.stack, ability],
+      pendingTriggers: state.pendingTriggers.slice(1),
+      awaiting: null,
+      priorityPlayerId: state.activePlayerId,
+      consecutivePasses: 0,
+    },
+  };
+}
+
+/** During cleanup, the active player discards down to the maximum hand size. */
+function discard(state: GameState, playerId: string, cardInstanceIds: string[]): CommandResult {
+  if (state.awaiting !== "discard") return fail("You don't need to discard right now.");
+  if (state.priorityPlayerId !== playerId) return fail("It isn't your turn to discard.");
+
+  const player = getPlayer(state, playerId);
+  const needed = player.hand.length - MAX_HAND_SIZE;
+  const chosen = new Set(cardInstanceIds);
+  if (chosen.size !== cardInstanceIds.length) return fail("A card can only be discarded once.");
+  if (chosen.size !== needed) return fail(`Choose exactly ${needed} card(s) to discard.`);
+  if (![...chosen].every((id) => player.hand.some((c) => c.instanceId === id))) {
+    return fail("One of those cards isn't in your hand.");
+  }
+
+  const discarded = player.hand.filter((c) => chosen.has(c.instanceId));
+  const next = replacePlayer(state, {
+    ...player,
+    hand: player.hand.filter((c) => !chosen.has(c.instanceId)),
+    graveyard: [...player.graveyard, ...discarded],
+  });
+  // The discard was the only thing holding up cleanup: finish the turn.
+  return { ok: true, state: finishCleanup({ ...next, awaiting: null }) };
+}
+
+function concede(state: GameState, playerId: string): CommandResult {
+  if (state.status === "finished") return fail("The game is already over.");
+  const player = findPlayer(state, playerId);
+  if (!player) return fail("You're not in this game.");
+  return {
+    ok: true,
+    state: {
+      ...state,
+      status: "finished",
+      winnerId: opponentOf(state, playerId).id,
+      endReason: "concede",
+      awaiting: null,
+    },
+  };
+}
+
 function runCommand(state: GameState, command: GameCommand): CommandResult {
   switch (command.type) {
     case "PASS_PRIORITY":
@@ -198,11 +309,60 @@ function runCommand(state: GameState, command: GameCommand): CommandResult {
       return playLand(state, command.playerId, command.cardInstanceId);
     case "CAST_SPELL":
       return castSpell(state, command.playerId, command.cardInstanceId, command.targets ?? []);
+    case "DECLARE_ATTACKERS":
+      return declareAttackers(state, command.playerId, command.attackerIds);
+    case "DECLARE_BLOCKERS":
+      return declareBlockers(state, command.playerId, command.blocks);
+    case "CHOOSE_TRIGGER_TARGET":
+      return chooseTriggerTarget(state, command.playerId, command.target);
+    case "DISCARD":
+      return discard(state, command.playerId, command.cardInstanceIds);
+    case "CONCEDE":
+      return concede(state, command.playerId);
   }
+}
+
+/**
+ * Moves pending triggers onto the stack. Triggers that don't need a target
+ * go straight on. The first one that does needs its controller to choose,
+ * so the game pauses there (awaiting = "trigger_target") and the rest wait
+ * their turn behind it.
+ */
+export function putTriggersOnStack(state: GameState): GameState {
+  if (state.status !== "in_progress" || state.awaiting !== null) return state;
+
+  let next = state;
+  while (next.pendingTriggers.length > 0) {
+    const pending = next.pendingTriggers[0];
+    if (pending.needsTarget) {
+      return {
+        ...next,
+        awaiting: "trigger_target",
+        priorityPlayerId: pending.controllerId,
+        consecutivePasses: 0,
+      };
+    }
+    const ability: StackObject = {
+      id: randomUUID(),
+      controllerId: pending.controllerId,
+      source: pending.source,
+      kind: "triggered_ability",
+      targets: [],
+      description: pending.description,
+    };
+    next = {
+      ...next,
+      stack: [...next.stack, ability],
+      pendingTriggers: next.pendingTriggers.slice(1),
+      priorityPlayerId: next.activePlayerId,
+      consecutivePasses: 0,
+    };
+  }
+  return next;
 }
 
 export function processCommand(state: GameState, command: GameCommand): CommandResult {
   const result = runCommand(state, command);
   if (!result.ok) return result;
-  return { ok: true, state: applyStateBasedActions(result.state) };
+  return { ok: true, state: putTriggersOnStack(applyStateBasedActions(result.state)) };
 }

@@ -15,11 +15,19 @@
  *   - Combat: if no creature was declared as an attacker, the declare
  *     blockers and combat damage steps are skipped, as in real Magic.
  *
- * Not here yet (later weeks): emptying mana pools between steps, discarding
- * to hand size at cleanup, ending "until end of turn" effects.
+ *   - Cleanup: if the active player has more than MAX_HAND_SIZE cards, the
+ *     game waits for them to discard (awaiting = "discard") before the turn
+ *     ends. Damage and "until end of turn" effects then wear off.
  */
 
 import type { GameState, Phase } from "../../../shared/src/types";
+import {
+  clearCombat,
+  dealCombatDamage,
+  eligibleAttackers,
+  eligibleBlockers,
+  hasFirstStrikeInCombat,
+} from "./combat";
 import { resolveTopOfStack } from "./stack";
 import { getPlayer, opponentOf, replacePlayer } from "./stateHelpers";
 
@@ -31,12 +39,15 @@ export const STEP_ORDER: readonly Phase[] = [
   "beginning_of_combat",
   "declare_attackers",
   "declare_blockers",
+  "first_strike_damage",
   "combat_damage",
   "end_of_combat",
   "main2",
   "end",
   "cleanup",
 ];
+
+export const MAX_HAND_SIZE = 7;
 
 export type TurnResult =
   | { ok: true; state: GameState }
@@ -92,10 +103,26 @@ function drawStep(state: GameState): GameState {
 }
 
 /**
- * Cleanup step: damage and "until end of turn" effects wear off at the same
- * moment, then the next player's turn begins.
+ * Cleanup step. First the active player discards down to hand size; if they
+ * need to, the game stops here and waits (awaiting = "discard"), and
+ * finishCleanup runs once they have. Then damage and "until end of turn"
+ * effects wear off at the same moment, and the next player's turn begins.
  */
 function cleanupStep(state: GameState): GameState {
+  const active = getPlayer(state, state.activePlayerId);
+  if (active.hand.length > MAX_HAND_SIZE) {
+    return {
+      ...state,
+      phase: "cleanup",
+      awaiting: "discard",
+      priorityPlayerId: active.id,
+      consecutivePasses: 0,
+    };
+  }
+  return finishCleanup(state);
+}
+
+export function finishCleanup(state: GameState): GameState {
   const cleaned = state.players.reduce(
     (current, player) =>
       replacePlayer(current, {
@@ -153,6 +180,38 @@ export function enterStep(state: GameState, step: Phase): GameState {
     }
     case "cleanup":
       return cleanupStep(state);
+
+    case "declare_attackers": {
+      // If some creature can attack, the game waits for the active player's
+      // declaration (possibly "no attackers") before anyone gets priority.
+      if (eligibleAttackers(state).length === 0) return givePriority(state, step);
+      return {
+        ...state,
+        phase: step,
+        awaiting: "attackers",
+        priorityPlayerId: state.activePlayerId,
+        consecutivePasses: 0,
+      };
+    }
+    case "declare_blockers": {
+      // Likewise for the defender, but only if they could block something.
+      if (eligibleBlockers(state).length === 0) return givePriority(state, step);
+      return {
+        ...state,
+        phase: step,
+        awaiting: "blockers",
+        priorityPlayerId: opponentOf(state, state.activePlayerId).id,
+        consecutivePasses: 0,
+      };
+    }
+    case "first_strike_damage":
+      return givePriority(dealCombatDamage({ ...state, phase: step }, "first_strike"), step);
+    case "combat_damage":
+      return givePriority(dealCombatDamage({ ...state, phase: step }, "regular"), step);
+    case "end_of_combat":
+      // Creatures leave combat as the end of combat step begins.
+      return givePriority(clearCombat(state), step);
+
     default:
       return givePriority(state, step);
   }
@@ -172,6 +231,10 @@ function nextStep(state: GameState): Phase {
       return "end_of_combat"; // nobody attacked: no blockers, no damage
     }
   }
+  // No first strikers in combat: skip straight to regular damage.
+  if (state.phase === "declare_blockers" && !hasFirstStrikeInCombat(state)) {
+    return "combat_damage";
+  }
   return STEP_ORDER[STEP_ORDER.indexOf(state.phase) + 1];
 }
 
@@ -180,6 +243,18 @@ function nextStep(state: GameState): Phase {
 export function passPriority(state: GameState, playerId: string): TurnResult {
   if (state.status !== "in_progress") {
     return { ok: false, reason: "The game isn't in progress." };
+  }
+  if (state.awaiting === "attackers") {
+    return { ok: false, reason: "Declare your attackers first." };
+  }
+  if (state.awaiting === "blockers") {
+    return { ok: false, reason: "Declare your blockers first." };
+  }
+  if (state.awaiting === "trigger_target") {
+    return { ok: false, reason: "A triggered ability needs a target first." };
+  }
+  if (state.awaiting === "discard") {
+    return { ok: false, reason: "Discard down to hand size first." };
   }
   if (state.priorityPlayerId !== playerId) {
     return { ok: false, reason: "You don't have priority." };

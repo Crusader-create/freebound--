@@ -45,7 +45,10 @@ export function updatePermanent(
   });
 }
 
-/** Moves a permanent from the battlefield to its OWNER's graveyard. */
+/**
+ * Moves a permanent from the battlefield to its OWNER's graveyard. A token
+ * has no card behind it, so it just ceases to exist instead.
+ */
 export function destroyPermanent(state: GameState, instanceId: string): GameState {
   const found = findPermanent(state, instanceId);
   if (!found) return state;
@@ -55,6 +58,8 @@ export function destroyPermanent(state: GameState, instanceId: string): GameStat
     ...found.controller,
     battlefield: found.controller.battlefield.filter((p) => p.instanceId !== instanceId),
   });
+
+  if (card.types.includes("Token")) return withoutIt;
 
   const owner = getPlayer(withoutIt, ownerId);
   return replacePlayer(withoutIt, {

@@ -57,6 +57,7 @@ export type BattlefieldCard = CardInstance & {
   toughnessModifier: number; // same; effective toughness = card.toughness + this
   attacking: boolean;
   blockingInstanceId?: string; // which attacker this creature is blocking
+  blockedBy?: string; // on an attacker: its blocker. Stays set even if the blocker dies
 };
 
 // ---------- Players ----------
@@ -89,6 +90,21 @@ export type StackObject = {
   source: CardInstance;
   kind: "spell" | "triggered_ability";
   targets: Target[];
+  /** For a triggered ability: a short description of what it does, for the UI. */
+  description?: string;
+};
+
+/**
+ * A triggered ability that has triggered but isn't on the stack yet. It
+ * waits in GameState.pendingTriggers until state-based actions have been
+ * checked, then goes on the stack. If it needs a target, the game waits
+ * for its controller to choose one first (GameState.awaiting = "trigger_target").
+ */
+export type PendingTrigger = {
+  controllerId: string;
+  source: CardInstance;
+  description: string;
+  needsTarget: boolean;
 };
 
 // ---------- Game state ----------
@@ -106,6 +122,7 @@ export type Phase =
   | "beginning_of_combat"
   | "declare_attackers"
   | "declare_blockers"
+  | "first_strike_damage" // only happens if a creature in combat has first strike
   | "combat_damage"
   | "end_of_combat"
   | "main2"
@@ -128,9 +145,21 @@ export type GameState = {
   activePlayerId: string;
   priorityPlayerId: string;
   consecutivePasses: number; // phase/stack advances when this reaches 2
+  /**
+   * Set while the game is waiting for a player's decision. Nobody has
+   * priority until it's made.
+   *   "attackers":      the active player must declare attackers
+   *   "blockers":       the defending player must declare blockers
+   *   "trigger_target": priorityPlayerId must pick a target for
+   *                     pendingTriggers[0]
+   *   "discard":        priorityPlayerId must discard down to hand size
+   */
+  awaiting: "attackers" | "blockers" | "trigger_target" | "discard" | null;
   turnNumber: number;
   phase: Phase;
   stack: StackObject[]; // the TOP of the stack is the LAST element
+  /** Triggered abilities waiting to go on the stack (see PendingTrigger). */
+  pendingTriggers: PendingTrigger[];
   winnerId: string | null;
   endReason: GameEndReason | null;
 };

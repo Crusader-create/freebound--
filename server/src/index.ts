@@ -6,6 +6,7 @@ import type { GameState, Target } from "../../shared/src/types";
 import { loadCardCache } from "./cards/cardCache";
 import { validateDeck } from "./cards/validateDeck";
 import { createGame, toView } from "./game/createGame";
+import { isBlockAssignment, type BlockAssignment } from "./game/combat";
 import { isTarget } from "./game/effects";
 import { processCommand, type GameCommand } from "./game/engine";
 import { keepHand, takeMulligan } from "./game/mulligan";
@@ -181,6 +182,58 @@ io.on("connection", (socket) => {
       cardInstanceId,
       targets: rawTargets as Target[],
     });
+  });
+
+  socket.on("declare_attackers", (payload: unknown) => {
+    const attackerIds = (payload as { attackerIds?: unknown } | null)?.attackerIds;
+    if (!Array.isArray(attackerIds) || !attackerIds.every((id) => typeof id === "string")) {
+      sendError(socket.id, "Invalid attackers.");
+      return;
+    }
+    applyCommand(socket.id, {
+      type: "DECLARE_ATTACKERS",
+      playerId: socket.id,
+      attackerIds: attackerIds as string[],
+    });
+  });
+
+  socket.on("declare_blockers", (payload: unknown) => {
+    const blocks = (payload as { blocks?: unknown } | null)?.blocks;
+    if (!Array.isArray(blocks) || !blocks.every(isBlockAssignment)) {
+      sendError(socket.id, "Invalid blockers.");
+      return;
+    }
+    applyCommand(socket.id, {
+      type: "DECLARE_BLOCKERS",
+      playerId: socket.id,
+      blocks: blocks as BlockAssignment[],
+    });
+  });
+
+  socket.on("choose_trigger_target", (payload: unknown) => {
+    const target = (payload as { target?: unknown } | null)?.target;
+    if (!isTarget(target)) {
+      sendError(socket.id, "Invalid target.");
+      return;
+    }
+    applyCommand(socket.id, { type: "CHOOSE_TRIGGER_TARGET", playerId: socket.id, target });
+  });
+
+  socket.on("discard", (payload: unknown) => {
+    const ids = (payload as { cardInstanceIds?: unknown } | null)?.cardInstanceIds;
+    if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) {
+      sendError(socket.id, "Invalid discard.");
+      return;
+    }
+    applyCommand(socket.id, {
+      type: "DISCARD",
+      playerId: socket.id,
+      cardInstanceIds: ids as string[],
+    });
+  });
+
+  socket.on("concede", () => {
+    applyCommand(socket.id, { type: "CONCEDE", playerId: socket.id });
   });
 
   // Dev-only testing shortcut: both players pass, so one click advances a step.

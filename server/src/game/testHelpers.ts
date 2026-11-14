@@ -85,6 +85,16 @@ export const FELL = fakeCard("Test Fell", ["Sorcery"], {
   oracleText: "Destroy target creature.",
 });
 
+/** A creature with the given stats and rules text (keywords go in oracleText). */
+export function fakeCreature(
+  name: string,
+  power: number,
+  toughness: number,
+  oracleText = ""
+): CachedCard {
+  return fakeCard(name, ["Creature"], { manaCost: "{1}", power, toughness, oracleText });
+}
+
 /** 24 Forests and 36 Bears: 60 cards. */
 export function fakeDeck(): ValidatedCard[] {
   return [
@@ -115,10 +125,57 @@ export function startedGame(): GameState {
   return state;
 }
 
-/** Whoever currently holds priority passes. */
+/**
+ * Whoever currently holds priority passes. If the game is waiting for a
+ * decision, a default one is made first, so tests that just walk through
+ * turns don't have to care:
+ *   attackers / blockers: declare none
+ *   trigger_target:       target the opponent
+ *   discard:              discard the first cards in hand
+ */
 export function pass(state: GameState): GameState {
+  let current = state;
+  if (current.awaiting === "attackers") {
+    current = unwrap(
+      processCommand(current, {
+        type: "DECLARE_ATTACKERS",
+        playerId: current.activePlayerId,
+        attackerIds: [],
+      })
+    );
+  } else if (current.awaiting === "blockers") {
+    current = unwrap(
+      processCommand(current, {
+        type: "DECLARE_BLOCKERS",
+        playerId: current.priorityPlayerId,
+        blocks: [],
+      })
+    );
+  } else if (current.awaiting === "trigger_target") {
+    const chooser = current.priorityPlayerId;
+    const opponentId = current.players.find((p) => p.id !== chooser)!.id;
+    current = unwrap(
+      processCommand(current, {
+        type: "CHOOSE_TRIGGER_TARGET",
+        playerId: chooser,
+        target: { kind: "player", playerId: opponentId },
+      })
+    );
+  } else if (current.awaiting === "discard") {
+    const player = getPlayer(current, current.priorityPlayerId);
+    const excess = player.hand.length - 7;
+    current = unwrap(
+      processCommand(current, {
+        type: "DISCARD",
+        playerId: player.id,
+        cardInstanceIds: player.hand.slice(0, excess).map((c) => c.instanceId),
+      })
+    );
+    // Discarding finishes cleanup and starts the next turn on its own.
+    return current;
+  }
   return unwrap(
-    processCommand(state, { type: "PASS_PRIORITY", playerId: state.priorityPlayerId })
+    processCommand(current, { type: "PASS_PRIORITY", playerId: current.priorityPlayerId })
   );
 }
 

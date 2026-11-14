@@ -87,9 +87,11 @@ export function createGame(seatA: PlayerSeat, seatB: PlayerSeat): GameState {
     activePlayerId: firstPlayerId,
     priorityPlayerId: firstPlayerId,
     consecutivePasses: 0,
+    awaiting: null,
     turnNumber: 1,
     phase: "untap",
     stack: [],
+    pendingTriggers: [],
     winnerId: null,
     endReason: null,
   };

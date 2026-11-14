@@ -1,75 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type {
-  BattlefieldCard,
-  CachedCard,
-  GameState,
-  Phase,
-} from "../../../shared/src/types";
-import type { ValidatedCard } from "../cards/validateDeck";
+import type { BattlefieldCard, GameState, Phase } from "../../../shared/src/types";
 import { createGame } from "./createGame";
 import { processCommand } from "./engine";
-import { keepHand } from "./mulligan";
 import { getPlayer, opponentOf, replacePlayer } from "./stateHelpers";
+import { atStep, BEAR, fakeDeck, pass, passUntil, startedGame, unwrap } from "./testHelpers";
 
 // ---------- helpers ----------
-
-function fakeCard(name: string, types: string[]): CachedCard {
-  return {
-    scryfallId: name,
-    name,
-    manaCost: "",
-    types,
-    oracleText: "",
-    imageUrl: "",
-    standardLegal: true,
-  };
-}
-
-/** 24 Forests and 36 Bears: 60 cards. */
-function fakeDeck(): ValidatedCard[] {
-  return [
-    { card: fakeCard("Forest", ["Basic", "Land"]), count: 24 },
-    { card: fakeCard("Bear", ["Creature"]), count: 36 },
-  ];
-}
-
-type AnyResult = { ok: true; state: GameState } | { ok: false; reason: string };
-
-function unwrap(result: AnyResult): GameState {
-  if (!result.ok) throw new Error(`Expected success but got: ${result.reason}`);
-  return result.state;
-}
-
-/** A game where both players have kept: turn 1, main phase 1, first player active. */
-function startedGame(): GameState {
-  let state = createGame(
-    { id: "p1", name: "Player 1", deck: fakeDeck() },
-    { id: "p2", name: "Player 2", deck: fakeDeck() }
-  );
-  state = unwrap(keepHand(state, "p1"));
-  state = unwrap(keepHand(state, "p2"));
-  return state;
-}
-
-/** Whoever currently holds priority passes. */
-function pass(state: GameState): GameState {
-  return unwrap(
-    processCommand(state, { type: "PASS_PRIORITY", playerId: state.priorityPlayerId })
-  );
-}
-
-function passUntil(state: GameState, done: (s: GameState) => boolean): GameState {
-  let current = state;
-  for (let i = 0; i < 300; i++) {
-    if (done(current)) return current;
-    current = pass(current);
-  }
-  throw new Error("passUntil never reached the target state");
-}
-
-function atStep(turn: number, phase: Phase) {
-  return (s: GameState) => s.turnNumber === turn && s.phase === phase;
-}
+// (The shared pass/passUntil helpers answer any pending decision, such as
+// "discard down to hand size", with a default, so these tests can walk
+// through whole turns without caring about them.)
 
 /** Makes sure the named card is in the player's hand, pulling it from the library. */
 function withCardInHand(state: GameState, playerId: string, name: string): GameState {
@@ -281,8 +220,8 @@ describe("playing a land", () => {
   it("refuses a card that isn't a land", () => {
     let state = passUntil(startedGame(), atStep(1, "main1"));
     const active = state.activePlayerId;
-    state = withCardInHand(state, active, "Bear");
-    const result = playLandCommand(state, active, handCardId(state, active, "Bear"));
+    state = withCardInHand(state, active, BEAR.name);
+    const result = playLandCommand(state, active, handCardId(state, active, BEAR.name));
     expect(result.ok).toBe(false);
   });
 
