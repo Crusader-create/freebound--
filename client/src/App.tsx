@@ -1,197 +1,177 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   BattlefieldCard,
   Card,
-  CardInstance,
   GameStateView,
   Target,
 } from "../../shared/src/types";
+import { SAMPLE_DECKS } from "./sampleDecks";
 import { socket } from "./socket";
-
-// Test convenience only: the Red Burn deck, so two tabs can queue quickly.
-const SAMPLE_DECK = `4 Swab Goblin
-4 Brazen Scourge
-4 Elder Auntie
-4 Skyraker Giant
-3 Fire Elemental
-3 Quaketusk Boar
-2 Rearing Embermare
-4 Shock
-4 Lightning Strike
-3 Sear
-3 Bombard
-22 Mountain`;
 
 type DeckError = { code: string; message: string };
 
-const CARD_W = 110;
-const CARD_H = Math.round(CARD_W * 1.4);
-
-function phaseLabel(phase: string): string {
-  return phase.replace(/_/g, " ");
-}
+const STEP_NAMES: Record<string, string> = {
+  untap: "Untap",
+  upkeep: "Upkeep",
+  draw: "Draw",
+  main1: "Main phase",
+  beginning_of_combat: "Beginning of combat",
+  declare_attackers: "Declare attackers",
+  declare_blockers: "Declare blockers",
+  first_strike_damage: "First strike damage",
+  combat_damage: "Combat damage",
+  end_of_combat: "End of combat",
+  main2: "Second main phase",
+  end: "End step",
+  cleanup: "Cleanup",
+};
 
 const isCreature = (c: { card: Card }) => c.card.types.includes("Creature");
+const isLand = (c: { card: Card }) => c.card.types.includes("Land");
 
-function statsOf(c: BattlefieldCard): string {
-  if (!isCreature(c)) return "";
-  const power = (c.card.power ?? 0) + c.powerModifier;
-  const toughness = (c.card.toughness ?? 0) + c.toughnessModifier;
-  return `${power}/${toughness}`;
+function power(c: BattlefieldCard) {
+  return (c.card.power ?? 0) + c.powerModifier;
+}
+function toughness(c: BattlefieldCard) {
+  return (c.card.toughness ?? 0) + c.toughnessModifier;
 }
 
-/** A card picture. Falls back to a plain text card when there's no image. */
-function CardImage({ card, dim = false }: { card: Card; dim?: boolean }) {
+// ---------- cards ----------
+
+/** A card picture with a hover zoom. Falls back to text when there's no image. */
+function CardImage({ card, big = false }: { card: Card; big?: boolean }) {
   const [broken, setBroken] = useState(false);
-  const style: React.CSSProperties = {
-    width: CARD_W,
-    height: CARD_H,
-    borderRadius: 6,
-    opacity: dim ? 0.55 : 1,
-    display: "block",
-  };
   if (!card.imageUrl || broken) {
     return (
-      <div
-        style={{
-          ...style,
-          background: "#444",
-          color: "#fff",
-          fontSize: 11,
-          padding: 6,
-          boxSizing: "border-box",
-          textAlign: "center",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-        }}
-      >
-        <div style={{ fontWeight: "bold" }}>{card.name}</div>
-        <div>{card.manaCost}</div>
+      <div className="card-text">
+        <b>{card.name}</b>
+        <span>{card.manaCost}</span>
         {card.power !== undefined && (
-          <div style={{ marginTop: 6 }}>
+          <span>
             {card.power}/{card.toughness}
-          </div>
+          </span>
         )}
       </div>
     );
   }
   return (
-    <img src={card.imageUrl} alt={card.name} title={card.name} style={style} onError={() => setBroken(true)} />
+    <span className="zoom">
+      <img className="card" src={card.imageUrl} alt={card.name} onError={() => setBroken(true)} />
+      {big && <img className="big" src={card.imageUrl} alt="" aria-hidden />}
+    </span>
   );
 }
 
-/** A permanent on the battlefield: the image plus its combat/status markers. */
-function Permanent({ c }: { c: BattlefieldCard }) {
-  const border = c.attacking
-    ? "3px solid #e33"
-    : c.blockingInstanceId !== undefined
-      ? "3px solid #36c"
-      : "3px solid transparent";
+function Permanent({
+  c,
+  pickable = false,
+  picked = false,
+  onPick,
+}: {
+  c: BattlefieldCard;
+  pickable?: boolean;
+  picked?: boolean;
+  onPick?: () => void;
+}) {
   const sick = c.summoningSick && isCreature(c);
+  const classes = [
+    "perm",
+    c.tapped && "tapped",
+    c.attacking && "attacking",
+    c.blockingInstanceId !== undefined && "blocking",
+    sick && "sick",
+    pickable && "pickable",
+    picked && "picked",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const hurt = c.damageMarked > 0 || c.toughnessModifier < 0;
   return (
-    <div style={{ display: "inline-block", margin: 4, textAlign: "center", width: CARD_W + 6 }}>
-      <div
-        style={{
-          border,
-          borderRadius: 8,
-          transform: c.tapped ? "rotate(90deg)" : "none",
-          transition: "transform 0.2s",
-          margin: c.tapped ? `${(CARD_H - CARD_W) / 2}px 0` : 0,
-        }}
-      >
-        <CardImage card={c.card} dim={sick} />
+    <div className={classes} onClick={pickable ? onPick : undefined} title={c.card.name}>
+      <div className="frame">
+        <CardImage card={c.card} big />
       </div>
-      <div style={{ fontSize: 12, marginTop: 2 }}>
-        {isCreature(c) && <strong>{statsOf(c)}</strong>}
-        {c.damageMarked > 0 && <span style={{ color: "#c00" }}> -{c.damageMarked}</span>}
-        {sick && <div>summoning sick</div>}
-        {c.tapped && <div>tapped</div>}
-        {c.attacking && <div style={{ color: "#e33" }}>attacking</div>}
-        {c.blockingInstanceId !== undefined && <div style={{ color: "#36c" }}>blocking</div>}
-        {c.blockedBy !== undefined && <div>blocked</div>}
-      </div>
+      {c.attacking && <span className="tag">attacking</span>}
+      {c.blockingInstanceId !== undefined && <span className="tag">blocking</span>}
+      {!c.attacking && c.blockingInstanceId === undefined && sick && <span className="tag">new</span>}
+      {isCreature(c) && (
+        <span className={"pt" + (hurt ? " hurt" : "")}>
+          {power(c)}/{toughness(c) - c.damageMarked}
+        </span>
+      )}
     </div>
   );
 }
 
-function Battlefield({ cards }: { cards: BattlefieldCard[] }) {
-  if (cards.length === 0) return <p style={{ color: "#888" }}>(empty)</p>;
-  // Lands behind, creatures in front, like a real table.
-  const lands = cards.filter((c) => c.card.types.includes("Land"));
-  const others = cards.filter((c) => !c.card.types.includes("Land"));
+function Field({ cards, mine }: { cards: BattlefieldCard[]; mine: boolean }) {
+  const lands = cards.filter(isLand);
+  const others = cards.filter((c) => !isLand(c));
+  // Creatures sit nearest the middle of the table on both sides.
+  const rows = mine ? [others, lands] : [lands, others];
   return (
-    <div>
-      <div style={{ display: "flex", flexWrap: "wrap" }}>
-        {others.map((c) => (
-          <Permanent key={c.instanceId} c={c} />
-        ))}
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap" }}>
-        {lands.map((c) => (
-          <Permanent key={c.instanceId} c={c} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Graveyard({ cards, label }: { cards: CardInstance[]; label: string }) {
-  return (
-    <details style={{ marginTop: 8 }}>
-      <summary>
-        {label} ({cards.length})
-      </summary>
-      <div style={{ display: "flex", flexWrap: "wrap" }}>
-        {cards.map((c) => (
-          <div key={c.instanceId} style={{ margin: 4 }}>
-            <CardImage card={c.card} />
+    <div className="field">
+      {cards.length === 0 ? (
+        <div className="row is-empty">
+          <span className="empty">nothing on the battlefield yet</span>
+        </div>
+      ) : (
+        rows.map((row, i) => (
+          <div className="row" key={i}>
+            {row.map((c) => (
+              <Permanent key={c.instanceId} c={c} />
+            ))}
           </div>
-        ))}
-      </div>
-    </details>
+        ))
+      )}
+    </div>
   );
 }
+
+// ---------- the app ----------
 
 export default function App() {
-  const [status, setStatus] = useState("connecting...");
-  const [deckText, setDeckText] = useState("");
+  const [conn, setConn] = useState("Connecting...");
+  const [deckName, setDeckName] = useState(() => {
+    const names = Object.keys(SAMPLE_DECKS);
+    return names[Math.floor(Math.random() * names.length)];
+  });
+  const [deckText, setDeckText] = useState(() => SAMPLE_DECKS[deckName].trim());
   const [errors, setErrors] = useState<DeckError[]>([]);
+  const [queued, setQueued] = useState(false);
   const [game, setGame] = useState<GameStateView | null>(null);
+  const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
+
   const [casting, setCasting] = useState<{ cardInstanceId: string; name: string } | null>(null);
-  const [selectedAttackers, setSelectedAttackers] = useState<string[]>([]);
-  const [blockChoices, setBlockChoices] = useState<Record<string, string>>({});
-  const [discardChoices, setDiscardChoices] = useState<string[]>([]);
+  const [attackers, setAttackers] = useState<string[]>([]);
+  const [blocks, setBlocks] = useState<Record<string, string>>({});
+  const [discards, setDiscards] = useState<string[]>([]);
 
   useEffect(() => {
-    const onConnect = () => setStatus("connected");
-    const onDisconnect = () => setStatus("Connection lost, reconnecting...");
+    const onConnect = () => setConn("Connected");
+    const onDisconnect = () => setConn("Connection lost. Reconnecting...");
     const onQueued = () => {
       setErrors([]);
-      setStatus("In queue, waiting for an opponent...");
+      setQueued(true);
     };
-    const onInvalid = (data: { errors: DeckError[] }) => {
-      setErrors(data.errors);
-      setStatus("Deck rejected");
+    const onInvalid = (d: { errors: DeckError[] }) => {
+      setErrors(d.errors);
+      setQueued(false);
     };
-    const onMatch = (data: { opponentName: string }) =>
-      setStatus("Match found! Opponent: " + data.opponentName);
-    const onState = (data: { gameState: GameStateView }) => {
-      setGame(data.gameState);
-      setStatus("OK");
+    const onState = (d: { gameState: GameStateView }) => {
+      setGame(d.gameState);
+      setQueued(false);
     };
-    const onGameError = (data: { message: string }) => setStatus("Error: " + data.message);
-    const onOppLeft = (data: { graceSeconds: number }) =>
-      setStatus(`Opponent disconnected. They have ${data.graceSeconds}s to return.`);
-    const onOppBack = () => setStatus("Opponent reconnected.");
+    const onError = (d: { message: string }) => setNotice({ text: d.message, error: true });
+    const onOppLeft = (d: { graceSeconds: number }) =>
+      setNotice({ text: `Your opponent disconnected. They have ${d.graceSeconds} seconds to return.` });
+    const onOppBack = () => setNotice({ text: "Your opponent is back." });
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("queued", onQueued);
     socket.on("deck_invalid", onInvalid);
-    socket.on("match_found", onMatch);
     socket.on("state_update", onState);
-    socket.on("game_error", onGameError);
+    socket.on("game_error", onError);
     socket.on("opponent_disconnected", onOppLeft);
     socket.on("opponent_reconnected", onOppBack);
     return () => {
@@ -199,97 +179,129 @@ export default function App() {
       socket.off("disconnect", onDisconnect);
       socket.off("queued", onQueued);
       socket.off("deck_invalid", onInvalid);
-      socket.off("match_found", onMatch);
       socket.off("state_update", onState);
-      socket.off("game_error", onGameError);
+      socket.off("game_error", onError);
       socket.off("opponent_disconnected", onOppLeft);
       socket.off("opponent_reconnected", onOppBack);
     };
   }, []);
 
-  const myPriority = game !== null && game.priorityPlayerId === game.you.id;
-  const myTurn = game !== null && game.activePlayerId === game.you.id;
-  const inMainPhase = game !== null && (game.phase === "main1" || game.phase === "main2");
-  const free = game !== null && game.status === "in_progress" && game.awaiting === null;
-  const sorcerySpeedOk = game !== null && free && myTurn && myPriority && inMainPhase && game.stack.length === 0;
-  const instantSpeedOk = free && myPriority;
-  const canPlayLand = game !== null && sorcerySpeedOk && game.you.landsPlayedThisTurn < 1;
-  const declaringAttackers = game !== null && game.awaiting === "attackers" && myTurn;
-  const declaringBlockers = game !== null && game.awaiting === "blockers" && myPriority;
-  const choosingTriggerTarget = game !== null && game.awaiting === "trigger_target" && myPriority;
-  const discarding = game !== null && game.awaiting === "discard" && myPriority;
-  const discardNeeded = game !== null ? Math.max(0, game.you.handCount - 7) : 0;
+  // A notice clears itself after a few seconds.
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 5000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
-  function chooseTarget(target: Target) {
-    if (!casting) return;
-    socket.emit("cast_spell", { cardInstanceId: casting.cardInstanceId, targets: [target] });
+  // Clear any half-made choice whenever the game moves on.
+  useEffect(() => {
     setCasting(null);
-  }
+    setAttackers([]);
+    setBlocks({});
+    setDiscards([]);
+  }, [game?.phase, game?.awaiting, game?.turnNumber]);
+
+  const you = game?.you;
+  const opp = game?.opponent;
+  const myPriority = !!game && game.priorityPlayerId === game.you.id;
+  const myTurn = !!game && game.activePlayerId === game.you.id;
+  const inMain = !!game && (game.phase === "main1" || game.phase === "main2");
+  const free = !!game && game.status === "in_progress" && game.awaiting === null;
+  const sorcerySpeed = free && myTurn && myPriority && inMain && game.stack.length === 0;
+  const instantSpeed = free && myPriority;
+  const canPlayLand = sorcerySpeed && !!you && you.landsPlayedThisTurn < 1;
+
+  const prompt = useMemo(() => {
+    if (!game) return null;
+    if (game.status === "finished") return "finished";
+    if (game.status === "mulligan") return you?.keptHand ? "waiting-keep" : "mulligan";
+    if (casting) return "target";
+    if (game.awaiting === "attackers") return myTurn ? "attackers" : "opp-attackers";
+    if (game.awaiting === "blockers") return myPriority ? "blockers" : "opp-blockers";
+    if (game.awaiting === "trigger_target") return myPriority ? "trigger" : "opp-trigger";
+    if (game.awaiting === "discard") return myPriority ? "discard" : "opp-discard";
+    return myPriority ? "priority" : "waiting";
+  }, [game, you, casting, myTurn, myPriority]);
+
+  const needsYou = ["mulligan", "target", "attackers", "blockers", "trigger", "discard", "priority"].includes(
+    prompt ?? ""
+  );
 
   function toggle(list: string[], set: (v: string[]) => void, id: string) {
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
   }
 
-  function submitAttackers() {
-    socket.emit("declare_attackers", { attackerIds: selectedAttackers });
-    setSelectedAttackers([]);
+  // ---------- lobby ----------
+
+  if (!game) {
+    return (
+      <div className="lobby">
+        <div className="lobby-card">
+          <h1>Freebound</h1>
+          <p className="tagline">Paste a decklist. Find an opponent. Play.</p>
+          <div className="decks">
+            {Object.keys(SAMPLE_DECKS).map((name) => (
+              <button
+                key={name}
+                className={name === deckName ? "primary" : ""}
+                onClick={() => {
+                  setDeckName(name);
+                  setDeckText(SAMPLE_DECKS[name].trim());
+                }}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+          <textarea
+            value={deckText}
+            onChange={(e) => setDeckText(e.target.value)}
+            placeholder={"4 Lightning Strike\n22 Mountain\n..."}
+            spellCheck={false}
+          />
+          <div className="row">
+            <button
+              className="primary"
+              disabled={queued}
+              onClick={() => socket.emit("join_queue", { deckText })}
+            >
+              {queued ? "Looking for an opponent..." : "Find a match"}
+            </button>
+            <span className="status">{conn}</span>
+          </div>
+          {errors.length > 0 && (
+            <ul className="errors">
+              {errors.map((e, i) => (
+                <li key={i}>{e.message}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    );
   }
 
-  function submitBlockers() {
-    const blocks = Object.entries(blockChoices)
-      .filter(([, attackerId]) => attackerId !== "")
-      .map(([blockerId, attackerId]) => ({ blockerId, attackerId }));
-    socket.emit("declare_blockers", { blocks });
-    setBlockChoices({});
-  }
+  // ---------- table ----------
 
-  function submitDiscard() {
-    socket.emit("discard", { cardInstanceIds: discardChoices });
-    setDiscardChoices([]);
-  }
+  const theirs = opp!;
+  const mine = you!;
 
-  function leaveGame() {
-    socket.emit("leave_game");
-    setGame(null);
-    setStatus("OK");
-  }
+  const playerTarget = (id: string): Target => ({ kind: "player", playerId: id });
+  const permTarget = (id: string): Target => ({ kind: "permanent", instanceId: id });
 
-  function describeTarget(target: Target): string {
-    if (!game) return "";
-    if (target.kind === "player") {
-      return target.playerId === game.you.id ? "you" : "opponent";
-    }
-    if (target.kind === "permanent") {
-      const all = [...game.you.battlefield, ...game.opponent.battlefield];
-      return all.find((p) => p.instanceId === target.instanceId)?.card.name ?? "a creature that's gone";
-    }
-    return "a spell";
-  }
-
-  /** Clickable pictures of every legal "any target": both players and all creatures. */
-  function TargetButtons({ onPick }: { onPick: (t: Target) => void }) {
-    if (!game) return null;
+  function TargetChoices({ onPick }: { onPick: (t: Target) => void }) {
     return (
       <>
-        <button onClick={() => onPick({ kind: "player", playerId: game.you.id })}>
-          You ({game.you.life})
-        </button>{" "}
-        <button onClick={() => onPick({ kind: "player", playerId: game.opponent.id })}>
-          Opponent ({game.opponent.life})
-        </button>
-        <div style={{ display: "flex", flexWrap: "wrap", marginTop: 8 }}>
-          {[
-            ...game.you.battlefield.filter(isCreature).map((c) => ({ c, owner: "yours" })),
-            ...game.opponent.battlefield.filter(isCreature).map((c) => ({ c, owner: "opponent's" })),
-          ].map(({ c, owner }) => (
-            <div
-              key={c.instanceId}
-              style={{ margin: 4, cursor: "pointer", textAlign: "center" }}
-              onClick={() => onPick({ kind: "permanent", instanceId: c.instanceId })}
-            >
+        <div className="player-targets">
+          <button onClick={() => onPick(playerTarget(theirs.id))}>Opponent ({theirs.life})</button>
+          <button onClick={() => onPick(playerTarget(mine.id))}>You ({mine.life})</button>
+        </div>
+        <div className="choices">
+          {[...theirs.battlefield, ...mine.battlefield].filter(isCreature).map((c) => (
+            <div key={c.instanceId} className="choice" onClick={() => onPick(permTarget(c.instanceId))}>
               <CardImage card={c.card} />
-              <div style={{ fontSize: 12 }}>
-                {statsOf(c)} ({owner})
+              <div className="name">
+                {power(c)}/{toughness(c)} {c.controllerId === mine.id ? "yours" : "theirs"}
               </div>
             </div>
           ))}
@@ -298,331 +310,328 @@ export default function App() {
     );
   }
 
-  return (
-    <div style={{ padding: 24, fontFamily: "sans-serif", maxWidth: 1100 }}>
-      <h1>Freebound</h1>
-      <p>Status: {status}</p>
-
-      {!game && (
-        <div style={{ marginTop: 24 }}>
-          <h2>Your deck</h2>
-          <textarea
-            rows={14}
-            style={{ width: "100%", maxWidth: 600 }}
-            placeholder="Paste a decklist here"
-            value={deckText}
-            onChange={(e) => setDeckText(e.target.value)}
-          />
-          <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-            <button onClick={() => setDeckText(SAMPLE_DECK)}>Fill sample deck</button>
-            <button onClick={() => socket.emit("join_queue", { deckText })}>Find match</button>
-          </div>
-          {errors.length > 0 && (
-            <ul style={{ color: "crimson" }}>
-              {errors.map((err, i) => (
-                <li key={i}>{err.message}</li>
+  function Panel() {
+    switch (prompt) {
+      case "mulligan":
+        return (
+          <>
+            <h2>Keep this hand?</h2>
+            <p>{game!.firstPlayerId === mine.id ? "You go first." : "Your opponent goes first."}</p>
+            {mine.mulligansTaken > 0 && (
+              <p>
+                If you keep, {mine.mulligansTaken} random card{mine.mulligansTaken > 1 ? "s" : ""} go to
+                the bottom of your library.
+              </p>
+            )}
+            <div className="choices">
+              <button className="primary" onClick={() => socket.emit("mulligan_decision", { keep: true })}>
+                Keep
+              </button>
+              <button
+                disabled={mine.mulligansTaken >= 6}
+                onClick={() => socket.emit("mulligan_decision", { keep: false })}
+              >
+                Mulligan
+              </button>
+            </div>
+          </>
+        );
+      case "waiting-keep":
+        return (
+          <>
+            <h2>Hand kept</h2>
+            <p>Waiting for your opponent to decide.</p>
+          </>
+        );
+      case "target":
+        return (
+          <>
+            <h2>Choose a target for {casting!.name}</h2>
+            <TargetChoices
+              onPick={(t) => {
+                socket.emit("cast_spell", { cardInstanceId: casting!.cardInstanceId, targets: [t] });
+                setCasting(null);
+              }}
+            />
+            <button className="quiet" onClick={() => setCasting(null)}>
+              Cancel
+            </button>
+          </>
+        );
+      case "attackers": {
+        const able = mine.battlefield.filter((c) => isCreature(c) && !c.tapped);
+        return (
+          <>
+            <h2>Choose your attackers</h2>
+            <p>Click creatures to pick them, then confirm. Confirm with none to skip combat.</p>
+            <div className="choices">
+              {able.map((c) => (
+                <Permanent
+                  key={c.instanceId}
+                  c={c}
+                  pickable
+                  picked={attackers.includes(c.instanceId)}
+                  onPick={() => toggle(attackers, setAttackers, c.instanceId)}
+                />
               ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {game && (
-        <div style={{ marginTop: 16 }}>
-          {game.status === "mulligan" && (
-            <div style={{ margin: "16px 0", padding: 12, border: "1px solid #888" }}>
-              <p>{game.firstPlayerId === game.you.id ? "You go first." : "Opponent goes first."}</p>
-              {!game.you.keptHand ? (
-                <>
-                  <p>
-                    Keep this hand, or mulligan? (Mulligans taken: {game.you.mulligansTaken})
-                  </p>
-                  <button onClick={() => socket.emit("mulligan_decision", { keep: true })}>
-                    Keep
-                  </button>{" "}
-                  <button
-                    disabled={game.you.mulligansTaken >= 6}
-                    onClick={() => socket.emit("mulligan_decision", { keep: false })}
-                  >
-                    Mulligan
-                  </button>
-                  {game.you.mulligansTaken > 0 && (
-                    <p>
-                      If you keep, {game.you.mulligansTaken} random card(s) go to the bottom
-                      of your library.
-                    </p>
-                  )}
-                </>
-              ) : (
-                <p>Hand kept. Waiting for opponent...</p>
-              )}
             </div>
-          )}
-
-          {game.status === "in_progress" && (
-            <div style={{ margin: "16px 0", padding: 12, border: "1px solid #888" }}>
-              <p>
-                <strong>Turn {game.turnNumber}</strong> - {myTurn ? "your turn" : "opponent's turn"}{" "}
-                - step: <strong>{phaseLabel(game.phase)}</strong>
-              </p>
-              <p>
-                {game.awaiting === "attackers" &&
-                  (myTurn ? "Declare your attackers." : "Opponent is declaring attackers...")}
-                {game.awaiting === "blockers" &&
-                  (myPriority ? "Declare your blockers." : "Opponent is declaring blockers...")}
-                {game.awaiting === "trigger_target" &&
-                  (myPriority
-                    ? "Choose a target for your triggered ability."
-                    : "Opponent is choosing a target...")}
-                {game.awaiting === "discard" &&
-                  (myPriority ? "Discard down to 7 cards." : "Opponent is discarding...")}
-                {game.awaiting === null &&
-                  (myPriority ? "You have priority." : "Opponent has priority.")}
-              </p>
-              <button
-                disabled={!myPriority || game.awaiting !== null}
-                onClick={() => socket.emit("pass_priority")}
-              >
-                Pass priority
-              </button>
-              {import.meta.env.DEV && (
-                <button style={{ marginLeft: 8 }} onClick={() => socket.emit("debug_pass_both")}>
-                  Pass for both players (dev only)
-                </button>
-              )}
-              <button
-                style={{ marginLeft: 8, color: "crimson" }}
-                onClick={() => {
-                  if (window.confirm("Concede the game?")) socket.emit("concede");
-                }}
-              >
-                Concede
-              </button>
-
-              <h3>Stack ({game.stack.length})</h3>
-              {game.stack.length === 0 ? (
-                <p style={{ color: "#888" }}>(empty)</p>
-              ) : (
-                <div style={{ display: "flex", flexWrap: "wrap" }}>
-                  {game.stack
-                    .slice()
-                    .reverse()
-                    .map((item, i) => (
-                      <div key={item.id} style={{ margin: 4, textAlign: "center", width: CARD_W + 40 }}>
-                        <CardImage card={item.source.card} />
-                        <div style={{ fontSize: 12, marginTop: 2 }}>
-                          {i === 0 && <strong>resolves next</strong>}
-                          <div>
-                            {item.kind === "triggered_ability" ? item.description : "spell"} (
-                            {item.controllerId === game.you.id ? "yours" : "opponent's"})
-                          </div>
-                          {item.targets.length > 0 && (
-                            <div>targeting {item.targets.map(describeTarget).join(", ")}</div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {declaringAttackers && (
-            <div style={{ margin: "16px 0", padding: 12, border: "2px solid #e33" }}>
-              <p>
-                <strong>Choose your attackers</strong> (click to toggle, or declare none):
-              </p>
-              <div style={{ display: "flex", flexWrap: "wrap" }}>
-                {game.you.battlefield.filter((c) => isCreature(c) && !c.tapped).map((c) => {
-                  const picked = selectedAttackers.includes(c.instanceId);
-                  return (
-                    <div
-                      key={c.instanceId}
-                      onClick={() => toggle(selectedAttackers, setSelectedAttackers, c.instanceId)}
-                      style={{
-                        margin: 4,
-                        cursor: "pointer",
-                        textAlign: "center",
-                        border: picked ? "3px solid #e33" : "3px solid transparent",
-                        borderRadius: 8,
-                      }}
-                    >
-                      <CardImage card={c.card} dim={c.summoningSick} />
-                      <div style={{ fontSize: 12 }}>
-                        {statsOf(c)}
-                        {c.summoningSick ? " (sick)" : ""}
-                      </div>
-                    </div>
-                  );
-                })}
+            <button
+              className="primary"
+              onClick={() => socket.emit("declare_attackers", { attackerIds: attackers })}
+            >
+              {attackers.length === 0 ? "No attack" : `Attack with ${attackers.length}`}
+            </button>
+          </>
+        );
+      }
+      case "blockers": {
+        const able = mine.battlefield.filter((c) => isCreature(c) && !c.tapped);
+        const incoming = theirs.battlefield.filter((c) => c.attacking);
+        return (
+          <>
+            <h2>Choose your blockers</h2>
+            <p>Each of your creatures can block one attacker.</p>
+            {able.map((b) => (
+              <div className="block-row" key={b.instanceId}>
+                <CardImage card={b.card} />
+                <select
+                  value={blocks[b.instanceId] ?? ""}
+                  onChange={(e) => setBlocks({ ...blocks, [b.instanceId]: e.target.value })}
+                >
+                  <option value="">doesn't block</option>
+                  {incoming.map((a) => (
+                    <option key={a.instanceId} value={a.instanceId}>
+                      blocks {a.card.name} ({power(a)}/{toughness(a)})
+                    </option>
+                  ))}
+                </select>
               </div>
-              <button style={{ marginTop: 8 }} onClick={submitAttackers}>
-                Declare {selectedAttackers.length} attacker(s)
-              </button>
-            </div>
-          )}
+            ))}
+            <button
+              className="primary"
+              onClick={() =>
+                socket.emit("declare_blockers", {
+                  blocks: Object.entries(blocks)
+                    .filter(([, a]) => a !== "")
+                    .map(([blockerId, attackerId]) => ({ blockerId, attackerId })),
+                })
+              }
+            >
+              Confirm blocks
+            </button>
+          </>
+        );
+      }
+      case "trigger":
+        return (
+          <>
+            <h2>{game!.pendingTriggers[0]?.description ?? "Choose a target"}</h2>
+            <TargetChoices onPick={(t) => socket.emit("choose_trigger_target", { target: t })} />
+          </>
+        );
+      case "discard": {
+        const need = Math.max(0, mine.handCount - 7);
+        return (
+          <>
+            <h2>Discard down to seven</h2>
+            <p>
+              Click {need} card{need > 1 ? "s" : ""} in your hand to discard. {discards.length} of {need}{" "}
+              chosen.
+            </p>
+            <button
+              className="primary"
+              disabled={discards.length !== need}
+              onClick={() => socket.emit("discard", { cardInstanceIds: discards })}
+            >
+              Discard
+            </button>
+          </>
+        );
+      }
+      case "priority":
+        return (
+          <>
+            <h2>{inMain && myTurn ? "Your main phase" : "You can respond"}</h2>
+            <p>
+              {inMain && myTurn
+                ? "Play a land, cast spells, or move on."
+                : game!.stack.length > 0
+                  ? "Cast an instant, or pass to let the stack resolve."
+                  : "Cast an instant, or pass."}
+            </p>
+            <button className="primary" onClick={() => socket.emit("pass_priority")}>
+              {inMain && myTurn ? (game!.phase === "main1" ? "To combat" : "End turn") : "Pass"}
+            </button>
+          </>
+        );
+      case "opp-attackers":
+        return <h2>Opponent is choosing attackers</h2>;
+      case "opp-blockers":
+        return <h2>Opponent is choosing blockers</h2>;
+      case "opp-trigger":
+        return <h2>Opponent is choosing a target</h2>;
+      case "opp-discard":
+        return <h2>Opponent is discarding</h2>;
+      case "finished": {
+        const won = game!.winnerId === mine.id;
+        const why: Record<string, string> = {
+          life: won ? "Your opponent ran out of life." : "You ran out of life.",
+          decked: won ? "Your opponent ran out of cards." : "You ran out of cards.",
+          concede: won ? "Your opponent conceded." : "You conceded.",
+          disconnect: won ? "Your opponent left the game." : "You left the game.",
+        };
+        return (
+          <>
+            <div className="result">{game!.winnerId === null ? "Draw" : won ? "You win" : "You lose"}</div>
+            <p>{why[game!.endReason ?? ""] ?? ""}</p>
+            <button
+              className="primary"
+              onClick={() => {
+                socket.emit("leave_game");
+                setGame(null);
+              }}
+            >
+              Back to the lobby
+            </button>
+          </>
+        );
+      }
+      default:
+        return (
+          <>
+            <h2>Waiting on your opponent</h2>
+            <p>They're deciding what to do.</p>
+          </>
+        );
+    }
+  }
 
-          {declaringBlockers && (
-            <div style={{ margin: "16px 0", padding: 12, border: "2px solid #36c" }}>
-              <p>
-                <strong>Choose your blockers</strong> (or none):
-              </p>
-              <div style={{ display: "flex", flexWrap: "wrap" }}>
-                {game.you.battlefield.filter((c) => isCreature(c) && !c.tapped).map((blocker) => (
-                  <div key={blocker.instanceId} style={{ margin: 4, textAlign: "center" }}>
-                    <CardImage card={blocker.card} />
-                    <div style={{ fontSize: 12 }}>{statsOf(blocker)} blocks</div>
-                    <select
-                      value={blockChoices[blocker.instanceId] ?? ""}
-                      onChange={(e) =>
-                        setBlockChoices({ ...blockChoices, [blocker.instanceId]: e.target.value })
-                      }
-                    >
-                      <option value="">(nothing)</option>
-                      {game.opponent.battlefield
-                        .filter((a) => a.attacking)
-                        .map((a) => (
-                          <option key={a.instanceId} value={a.instanceId}>
-                            {a.card.name} {statsOf(a)}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                ))}
-              </div>
-              <button style={{ marginTop: 8 }} onClick={submitBlockers}>
-                Declare blockers
-              </button>
-            </div>
-          )}
+  return (
+    <div className="table">
+      <div className="bar opp-bar">
+        <span className="who">Opponent</span>
+        <span className={"life" + (theirs.life <= 5 ? " low" : "")}>{theirs.life}</span>
+        <span className="stat">
+          hand <b>{theirs.handCount}</b>
+        </span>
+        <span className="stat">
+          library <b>{theirs.libraryCount}</b>
+        </span>
+        <span className="stat">
+          graveyard <b>{theirs.graveyard.length}</b>
+        </span>
+      </div>
 
-          {choosingTriggerTarget && (
-            <div style={{ margin: "16px 0", padding: 12, border: "2px solid #c80" }}>
-              <p>
-                <strong>
-                  Choose a target for {game.pendingTriggers[0]?.description ?? "the ability"}:
-                </strong>
-              </p>
-              <TargetButtons onPick={(t) => socket.emit("choose_trigger_target", { target: t })} />
-            </div>
-          )}
+      <div className="opp-field">
+        <Field cards={theirs.battlefield} mine={false} />
+      </div>
 
-          {discarding && (
-            <div style={{ margin: "16px 0", padding: 12, border: "2px solid #c80" }}>
-              <p>
-                <strong>Discard {discardNeeded} card(s)</strong> ({discardChoices.length} chosen):
-              </p>
-              <div style={{ display: "flex", flexWrap: "wrap" }}>
-                {game.you.hand?.map((c) => {
-                  const picked = discardChoices.includes(c.instanceId);
-                  return (
-                    <div
-                      key={c.instanceId}
-                      onClick={() => toggle(discardChoices, setDiscardChoices, c.instanceId)}
-                      style={{
-                        margin: 4,
-                        cursor: "pointer",
-                        border: picked ? "3px solid #c80" : "3px solid transparent",
-                        borderRadius: 8,
-                      }}
-                    >
-                      <CardImage card={c.card} />
-                    </div>
-                  );
-                })}
-              </div>
-              <button
-                style={{ marginTop: 8 }}
-                disabled={discardChoices.length !== discardNeeded}
-                onClick={submitDiscard}
-              >
-                Discard
-              </button>
-            </div>
-          )}
-
-          {game.status === "finished" && (
-            <div style={{ margin: "16px 0", padding: 12, border: "2px solid #888" }}>
-              <p style={{ fontSize: 20 }}>
-                <strong>Game over.</strong>{" "}
-                {game.winnerId === null
-                  ? "Draw"
-                  : game.winnerId === game.you.id
-                    ? "You win"
-                    : "You lose"}{" "}
-                ({game.endReason})
-              </p>
-              <button onClick={leaveGame}>Back to deck list</button>
-            </div>
-          )}
-
-          {casting && (
-            <div style={{ margin: "16px 0", padding: 12, border: "2px solid #c80" }}>
-              <p>
-                <strong>Choose a target for {casting.name}:</strong>
-              </p>
-              <TargetButtons onPick={chooseTarget} />
-              <button style={{ marginTop: 8 }} onClick={() => setCasting(null)}>
-                Cancel
-              </button>
-            </div>
-          )}
-
-          {/* ---------- opponent's side ---------- */}
-          <h3>
-            Opponent - life {game.opponent.life} - hand {game.opponent.handCount} - library{" "}
-            {game.opponent.libraryCount}
-          </h3>
-          <Battlefield cards={game.opponent.battlefield} />
-          <Graveyard cards={game.opponent.graveyard} label="Opponent's graveyard" />
-
-          <hr style={{ margin: "24px 0" }} />
-
-          {/* ---------- your side ---------- */}
-          <h3>
-            You - life {game.you.life} - library {game.you.libraryCount} - lands played this turn{" "}
-            {game.you.landsPlayedThisTurn}
-          </h3>
-          <Battlefield cards={game.you.battlefield} />
-          <Graveyard cards={game.you.graveyard} label="Your graveyard" />
-
-          <h3>Your hand ({game.you.handCount})</h3>
-          <div style={{ display: "flex", flexWrap: "wrap" }}>
-            {game.you.hand?.map((c) => {
-              const types = c.card.types;
-              const isLand = types.includes("Land");
-              const needsTarget = types.includes("Instant") || types.includes("Sorcery");
-              const canCast = types.includes("Instant") ? instantSpeedOk : sorcerySpeedOk;
-              return (
-                <div key={c.instanceId} style={{ margin: 4, textAlign: "center", width: CARD_W + 6 }}>
-                  <CardImage card={c.card} />
-                  <div style={{ marginTop: 4 }}>
-                    {isLand ? (
-                      <button
-                        disabled={!canPlayLand}
-                        onClick={() => socket.emit("play_land", { cardInstanceId: c.instanceId })}
-                      >
-                        Play
-                      </button>
-                    ) : (
-                      <button
-                        disabled={!canCast}
-                        onClick={() =>
-                          needsTarget
-                            ? setCasting({ cardInstanceId: c.instanceId, name: c.card.name })
-                            : socket.emit("cast_spell", { cardInstanceId: c.instanceId })
-                        }
-                      >
-                        Cast
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+      <div className="middle">
+        <div className="turn">
+          <div className="step">{STEP_NAMES[game.phase] ?? game.phase}</div>
+          <div className="whose">
+            Turn {game.turnNumber}. {myTurn ? "Your turn." : "Opponent's turn."}
           </div>
         </div>
-      )}
+        <div className="stack">
+          {game.stack.length === 0 ? (
+            <span className="label">the stack is empty</span>
+          ) : (
+            game.stack
+              .slice()
+              .reverse()
+              .map((item, i) => (
+                <div key={item.id} className="choice" title={item.description ?? item.source.card.name}>
+                  <CardImage card={item.source.card} big />
+                  <div className="name">
+                    {i === 0 ? "resolves next" : ""}
+                    {item.kind === "triggered_ability" ? " (ability)" : ""}
+                  </div>
+                </div>
+              ))
+          )}
+        </div>
+        <div className="actions">
+          {import.meta.env.DEV && (
+            <button className="quiet" onClick={() => socket.emit("debug_pass_both")}>
+              dev: pass both
+            </button>
+          )}
+          <button
+            className="danger"
+            onClick={() => {
+              if (window.confirm("Concede this game?")) socket.emit("concede");
+            }}
+          >
+            Concede
+          </button>
+        </div>
+      </div>
+
+      <div className="my-field">
+        <Field cards={mine.battlefield} mine />
+        <div className="bar my-bar">
+          <span className="who">You</span>
+          <span className={"life" + (mine.life <= 5 ? " low" : "")}>{mine.life}</span>
+          <span className="stat">
+            library <b>{mine.libraryCount}</b>
+          </span>
+          <span className="stat">
+            graveyard <b>{mine.graveyard.length}</b>
+          </span>
+          <span className="stat">
+            land drop <b>{mine.landsPlayedThisTurn < 1 ? "available" : "used"}</b>
+          </span>
+        </div>
+      </div>
+
+      <div className="hand">
+        <div className="count">
+          Hand
+          <br />
+          <b>{mine.handCount}</b>
+        </div>
+        <div className="fan">
+          {mine.hand?.map((c) => {
+            const land = isLand(c);
+            const targeted = c.card.types.includes("Instant") || c.card.types.includes("Sorcery");
+            const castOk = c.card.types.includes("Instant") ? instantSpeed : sorcerySpeed;
+            const playable = prompt === "discard" ? false : land ? canPlayLand : castOk;
+            const picked = prompt === "discard" && discards.includes(c.instanceId);
+            return (
+              <div
+                key={c.instanceId}
+                className={"hand-card" + (playable ? " playable" : "") + (picked ? " picked" : "")}
+                onClick={prompt === "discard" ? () => toggle(discards, setDiscards, c.instanceId) : undefined}
+              >
+                <CardImage card={c.card} big />
+                {prompt !== "discard" && (
+                  <button
+                    disabled={!playable}
+                    onClick={() =>
+                      land
+                        ? socket.emit("play_land", { cardInstanceId: c.instanceId })
+                        : targeted
+                          ? setCasting({ cardInstanceId: c.instanceId, name: c.card.name })
+                          : socket.emit("cast_spell", { cardInstanceId: c.instanceId })
+                    }
+                  >
+                    {land ? "Play" : "Cast"}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <aside className={"panel" + (needsYou ? " needs-you" : "")}>
+        <Panel />
+        <div className="footer">
+          {notice && <div className={"notice" + (notice.error ? " error" : "")}>{notice.text}</div>}
+          <span className="conn">{conn}</span>
+        </div>
+      </aside>
     </div>
   );
 }
