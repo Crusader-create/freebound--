@@ -15,9 +15,14 @@ import type {
 } from "../../../shared/src/types";
 import type { ValidatedCard } from "../cards/validateDeck";
 import { createGame } from "./createGame";
-import { processCommand } from "./engine";
+import { processCommand, setAutoPass } from "./engine";
 import { keepHand } from "./mulligan";
 import { getPlayer, replacePlayer } from "./stateHelpers";
+
+// The rules tests step through the game one pass at a time and need to see
+// every intermediate step, so auto-pass is off for any file that imports
+// these helpers. The flow tests (autoPass.test.ts) turn it back on.
+setAutoPass(false);
 
 // ---------- fake cards ----------
 

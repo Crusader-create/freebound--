@@ -160,6 +160,13 @@ export type GameState = {
   stack: StackObject[]; // the TOP of the stack is the LAST element
   /** Triggered abilities waiting to go on the stack (see PendingTrigger). */
   pendingTriggers: PendingTrigger[];
+  /**
+   * True once a player has deliberately acted or declared in the current
+   * step. Auto-pass won't pass for the active player while this is set:
+   * after attacking, they get to see the attack and respond before the
+   * game moves on. Cleared whenever a new step begins.
+   */
+  actedThisStep: boolean;
   winnerId: string | null;
   endReason: GameEndReason | null;
 };

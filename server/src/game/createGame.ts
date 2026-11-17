@@ -92,6 +92,7 @@ export function createGame(seatA: PlayerSeat, seatB: PlayerSeat): GameState {
     phase: "untap",
     stack: [],
     pendingTriggers: [],
+    actedThisStep: false,
     winnerId: null,
     endReason: null,
   };

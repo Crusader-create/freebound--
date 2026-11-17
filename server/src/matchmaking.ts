@@ -3,20 +3,23 @@
  *
  * Plain first-come-first-served matchmaking: the first two players waiting
  * get paired. No skill or rank matching.
+ *
+ * Players are identified by their playerId (from their session), not their
+ * socket, so a reconnecting player is the same player.
  */
 
 import type { ValidatedCard } from "./cards/validateDeck";
 
 export type QueueEntry = {
-  socketId: string;
+  playerId: string;
   deck: ValidatedCard[];
 };
 
 export class MatchmakingQueue {
   private waiting: QueueEntry[] = [];
 
-  has(socketId: string): boolean {
-    return this.waiting.some((entry) => entry.socketId === socketId);
+  has(playerId: string): boolean {
+    return this.waiting.some((entry) => entry.playerId === playerId);
   }
 
   /**
@@ -25,7 +28,7 @@ export class MatchmakingQueue {
    * waits. Joining twice is a no-op.
    */
   join(entry: QueueEntry): QueueEntry | null {
-    if (this.has(entry.socketId)) return null;
+    if (this.has(entry.playerId)) return null;
 
     const opponent = this.waiting.shift();
     if (opponent) return opponent;
@@ -34,7 +37,7 @@ export class MatchmakingQueue {
     return null;
   }
 
-  leave(socketId: string): void {
-    this.waiting = this.waiting.filter((entry) => entry.socketId !== socketId);
+  leave(playerId: string): void {
+    this.waiting = this.waiting.filter((entry) => entry.playerId !== playerId);
   }
 }

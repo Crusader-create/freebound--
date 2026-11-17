@@ -31,6 +31,7 @@ import {
   declareBlockers,
   type BlockAssignment,
 } from "./combat";
+import { hasSomethingToDo } from "./autoPass";
 import { effectTargetSpec, getSpellEffect, targetProblem } from "./effects";
 import { parseManaCost, planPayment } from "./mana";
 import { applyStateBasedActions } from "./sba";
@@ -361,8 +362,53 @@ export function putTriggersOnStack(state: GameState): GameState {
   return next;
 }
 
+/** The bookkeeping that follows every action: SBA, then pending triggers. */
+function settle(state: GameState): GameState {
+  return putTriggersOnStack(applyStateBasedActions(state));
+}
+
+/**
+ * Passes priority on behalf of any player who has nothing they could do,
+ * repeatedly, until the game reaches a real choice. This is what makes a
+ * turn flow instead of needing a click at every step.
+ *
+ * Every automatic pass goes through the same passPriority() as a real one,
+ * so the rules engine never knows the difference. The loop is bounded so a
+ * bug can never spin forever.
+ */
+/**
+ * Test hook. The rules tests walk the game one step at a time and need to
+ * observe steps that auto-pass would otherwise skip straight through, so
+ * they turn it off. It's always on in the real server.
+ */
+export let autoPassEnabled = true;
+export function setAutoPass(enabled: boolean): void {
+  autoPassEnabled = enabled;
+}
+
+export function autoAdvance(state: GameState): GameState {
+  if (!autoPassEnabled) return state;
+  let current = state;
+  for (let i = 0; i < 200; i++) {
+    if (current.status !== "in_progress" || current.awaiting !== null) return current;
+    if (hasSomethingToDo(current)) return current;
+
+    const passed = passPriority(current, current.priorityPlayerId);
+    if (!passed.ok) return current;
+    current = settle(passed.state);
+  }
+  return current;
+}
+
 export function processCommand(state: GameState, command: GameCommand): CommandResult {
   const result = runCommand(state, command);
   if (!result.ok) return result;
-  return { ok: true, state: putTriggersOnStack(applyStateBasedActions(result.state)) };
+
+  // Anything other than a plain pass is a deliberate act in this step. It
+  // earns the active player a stop here, so they can see what they did
+  // (an attack, a spell) and respond before the game moves on.
+  const acted = command.type !== "PASS_PRIORITY" && result.state.phase === state.phase;
+  const marked = acted ? { ...result.state, actedThisStep: true } : result.state;
+
+  return { ok: true, state: autoAdvance(settle(marked)) };
 }

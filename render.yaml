@@ -1,0 +1,49 @@
+# Render Blueprint for Freebound.
+# https://render.com/docs/blueprint-spec
+#
+# Two services:
+#   freebound-server  the Node game server (Socket.IO). Free tier spins
+#                     down after 15 minutes without traffic.
+#   freebound-client  the built React app, served as a static site.
+#                     Static sites never spin down.
+#
+# After the first deploy, fill in the two cross-references below with the
+# URLs Render assigns (they're shown on each service's page):
+#   - the server's CLIENT_ORIGIN must be the client's URL
+#   - the client's VITE_SERVER_URL must be the server's URL
+
+services:
+  - type: web
+    name: freebound-server
+    runtime: node
+    plan: free
+    rootDir: .
+    # Install from the root so npm workspaces link client/server/shared,
+    # then fetch the card data (it's git-ignored, so it's rebuilt each deploy).
+    buildCommand: npm install && npm run build --workspace=server
+    startCommand: npm run start --workspace=server
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CLIENT_ORIGIN
+        # Replace after the client deploys, e.g. https://freebound-client.onrender.com
+        value: https://freebound-client.onrender.com
+      - key: RECONNECT_GRACE_MS
+        value: "60000"
+
+  - type: web
+    name: freebound-client
+    runtime: static
+    rootDir: .
+    buildCommand: npm install && npm run build --workspace=client
+    staticPublishPath: client/dist
+    envVars:
+      - key: VITE_SERVER_URL
+        # Replace after the server deploys, e.g. https://freebound-server.onrender.com
+        value: https://freebound-server.onrender.com
+    routes:
+      # Single-page app: every path serves index.html.
+      - type: rewrite
+        source: /*
+        destination: /index.html

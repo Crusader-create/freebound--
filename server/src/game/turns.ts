@@ -155,6 +155,7 @@ function givePriority(state: GameState, step: Phase): GameState {
     phase: step,
     priorityPlayerId: state.activePlayerId,
     consecutivePasses: 0,
+    actedThisStep: false, // a fresh step: nobody has acted in it yet
   };
 }
 
@@ -191,6 +192,7 @@ export function enterStep(state: GameState, step: Phase): GameState {
         awaiting: "attackers",
         priorityPlayerId: state.activePlayerId,
         consecutivePasses: 0,
+        actedThisStep: false,
       };
     }
     case "declare_blockers": {
@@ -202,6 +204,7 @@ export function enterStep(state: GameState, step: Phase): GameState {
         awaiting: "blockers",
         priorityPlayerId: opponentOf(state, state.activePlayerId).id,
         consecutivePasses: 0,
+        actedThisStep: false,
       };
     }
     case "first_strike_damage":
