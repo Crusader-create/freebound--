@@ -6,6 +6,7 @@ import { parseDecklist } from "../../shared/src/deckParser";
 import type { GameState, Target } from "../../shared/src/types";
 import { loadCardCache } from "./cards/cardCache";
 import { validateDeck } from "./cards/validateDeck";
+import { setEndStepStop } from "./game/autoPass";
 import { createGame, toView } from "./game/createGame";
 import { isBlockAssignment, type BlockAssignment } from "./game/combat";
 import { isTarget } from "./game/effects";
@@ -355,6 +356,18 @@ io.on("connection", (socket) => {
       playerId: session.playerId,
       cardInstanceIds: ids as string[],
     });
+  });
+
+  // A player setting, not a game action: it doesn't use priority or move the game.
+  socket.on("set_end_step_stop", (payload: unknown) => {
+    const on = (payload as { on?: unknown } | null)?.on;
+    if (typeof on !== "boolean") return;
+    const game = session.gameId ? games.get(session.gameId) : undefined;
+    if (!game || game.status === "finished") return;
+    const next = setEndStepStop(game, session.playerId, on);
+    if (next === game) return;
+    games.set(game.gameId, next);
+    sendState(next);
   });
 
   socket.on("concede", () => {

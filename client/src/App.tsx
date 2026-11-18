@@ -141,6 +141,23 @@ function renderLogText(text: string, myId: string): string {
 }
 
 const LOG_PREF_KEY = "freebound.showLog";
+const END_STOP_PREF_KEY = "freebound.endStepStop";
+
+function loadEndStopPref(): boolean {
+  try {
+    return localStorage.getItem(END_STOP_PREF_KEY) === "on"; // off unless turned on
+  } catch {
+    return false;
+  }
+}
+
+function saveEndStopPref(on: boolean) {
+  try {
+    localStorage.setItem(END_STOP_PREF_KEY, on ? "on" : "off");
+  } catch {
+    // Storage can be unavailable (private mode); the setting still works for this game.
+  }
+}
 
 function loadLogPref(): boolean {
   try {
@@ -205,6 +222,23 @@ export default function App() {
   const [discards, setDiscards] = useState<string[]>([]);
   const [showLog, setShowLog] = useState(loadLogPref);
   const [musicOn, setMusicOn] = useState(loadMusicPref);
+  const [endStop, setEndStop] = useState(loadEndStopPref);
+
+  function toggleEndStop() {
+    const on = !endStop;
+    setEndStop(on);
+    saveEndStopPref(on);
+    socket.emit("set_end_step_stop", { on });
+  }
+
+  // The server keeps this setting per game, so send it whenever a game
+  // (new or reconnected) doesn't match what this browser remembers.
+  const serverEndStop = game?.you.stopAtOpponentEndStep;
+  useEffect(() => {
+    if (serverEndStop !== undefined && serverEndStop !== endStop) {
+      socket.emit("set_end_step_stop", { on: endStop });
+    }
+  }, [serverEndStop, endStop]);
 
   function toggleMusic() {
     const on = !musicOn;
@@ -655,6 +689,14 @@ export default function App() {
             </button>
           )}
           {musicButton}
+          <button
+            className="quiet"
+            aria-pressed={endStop}
+            onClick={toggleEndStop}
+            title="When on, the game stops at your opponent's end step if you're holding an instant you could cast."
+          >
+            End-step stops: {endStop ? "on" : "off"}
+          </button>
           <button className="quiet" aria-pressed={showLog} onClick={toggleLog}>
             {showLog ? "Hide log" : "Show log"}
           </button>

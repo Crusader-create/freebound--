@@ -75,6 +75,7 @@ export type Player = {
   mulligansTaken: number;
   keptHand: boolean; // true once the player has finished mulligan decisions
   landsPlayedThisTurn: number;
+  stopAtOpponentEndStep: boolean; // the player's "End-step stops" setting (see autoPass.ts)
 };
 
 // ---------- The stack ----------

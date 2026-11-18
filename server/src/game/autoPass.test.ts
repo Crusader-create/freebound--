@@ -13,19 +13,22 @@
  *   - an opponent holding a castable instant IS stopped to respond
  *   - an opponent with nothing castable is NOT stopped
  *   - after declaring attackers, the game stops before damage
+ *   - holding an instant only stops you when it has a legal target and
+ *     there's a moment to use it (a spell to answer, or combat)
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "crypto";
 import type { CachedCard, GameState } from "../../../shared/src/types";
 import { createGame } from "./createGame";
+import { setEndStepStop } from "./autoPass";
 import { autoAdvance, processCommand, setAutoPass } from "./engine";
 import { keepHand } from "./mulligan";
 import { getPlayer, opponentOf, replacePlayer } from "./stateHelpers";
 import {
   addPermanent,
   BEAR,
-
+  fakeCard,
   fakeCreature,
   FOREST,
   MOUNTAIN,
@@ -247,6 +250,130 @@ describe("combat with auto-pass", () => {
     expect(blockerAlive).toBe(false); // the 1/1 blocked a 2/2
     expect(getPlayer(g, opp).life).toBe(20); // the attacker was blocked, so no player damage
     expect(g.phase).toBe("main2");
+  });
+});
+
+describe("instants only stop you when they're useful", () => {
+  const BURN_CREATURE = fakeCard("Test Creature Burn", ["Instant"], {
+    manaCost: "{R}",
+    oracleText: "Test Creature Burn deals 3 damage to target creature.",
+  });
+  const RED_STRIKE = fakeCard("Test Red Strike", ["Instant"], {
+    manaCost: "{R}",
+    oracleText: "Destroy target attacking or blocking creature.",
+  });
+
+  function withOpenMana(oppHand: CachedCard[]) {
+    let g = started();
+    const me = g.activePlayerId;
+    const opp = opponentOf(g, me).id;
+    g = addPermanent(g, me, FOREST).state;
+    g = addPermanent(g, me, FOREST).state;
+    g = addPermanent(g, opp, MOUNTAIN).state;
+    g = setHand(g, me, [FOREST, BEAR]);
+    g = setHand(g, opp, oppHand);
+    return { g, me, opp };
+  }
+
+  it("holding Shock with open mana doesn't add clicks to a quiet turn", () => {
+    let { g, me, opp } = withOpenMana([SHOCK]);
+
+    const land = handCard(g, me, FOREST.name);
+    g = unwrap(processCommand(g, { type: "PLAY_LAND", playerId: me, cardInstanceId: land.instanceId }));
+    g = pass(g, me); // end main 1: straight to main 2, no stop for the opponent
+    expect(g.phase).toBe("main2");
+    expect(g.priorityPlayerId).toBe(me);
+
+    g = pass(g, me); // end main 2: my end step passes without asking them
+    expect(g.turnNumber).toBe(2);
+    expect(g.activePlayerId).toBe(opp);
+    expect(g.phase).toBe("main1"); // their upkeep and draw weren't stops either
+  });
+
+  it("a creature-only spell with no creatures out doesn't stop the opponent", () => {
+    let { g, me } = withOpenMana([BURN_CREATURE]);
+    const bear = handCard(g, me, BEAR.name);
+    g = unwrap(processCommand(g, { type: "CAST_SPELL", playerId: me, cardInstanceId: bear.instanceId }));
+    g = pass(g, me);
+    expect(g.stack).toHaveLength(0); // the Bear resolved without asking them
+    expect(g.priorityPlayerId).toBe(me);
+  });
+
+  it("'destroy target attacking creature' doesn't stop anyone outside combat", () => {
+    let { g, me } = withOpenMana([RED_STRIKE]);
+    g = addPermanent(g, me, fakeCreature("Bystander", 2, 2)).state; // a creature, but not attacking
+    const bear = handCard(g, me, BEAR.name);
+    g = unwrap(processCommand(g, { type: "CAST_SPELL", playerId: me, cardInstanceId: bear.instanceId }));
+    g = pass(g, me);
+    expect(g.stack).toHaveLength(0);
+    expect(g.priorityPlayerId).toBe(me);
+  });
+
+  it("the defender holding a trick gets one stop in combat, after blocks", () => {
+    let { g, me, opp } = withOpenMana([RED_STRIKE]);
+    const attacker = addPermanent(g, me, fakeCreature("Attacker", 2, 2));
+    g = setHand(attacker.state, me, []);
+
+    g = pass(g, me);
+    g = unwrap(processCommand(g, { type: "DECLARE_ATTACKERS", playerId: me, attackerIds: [attacker.instanceId] }));
+    g = pass(g, me); // I'm done; they have no blockers, so this is their window to kill the attacker
+    expect(g.phase).toBe("declare_blockers");
+    expect(g.priorityPlayerId).toBe(opp);
+    expect(getPlayer(g, opp).life).toBe(20);
+
+    g = pass(g, opp); // they decline; damage goes through
+    expect(getPlayer(g, opp).life).toBe(18);
+    expect(g.phase).toBe("main2");
+  });
+});
+
+describe("end-step stops (optional)", () => {
+  /** My turn, main 2. The opponent holds the given hand with an untapped Mountain. */
+  function atMyMain2(oppHand: CachedCard[], stopOn: boolean) {
+    let g = started();
+    const me = g.activePlayerId;
+    const opp = opponentOf(g, me).id;
+    g = addPermanent(g, opp, MOUNTAIN).state;
+    g = setHand(g, me, []);
+    g = setHand(g, opp, oppHand);
+    g = setEndStepStop(g, opp, stopOn);
+    g = pass(g, me); // end main 1 -> main 2
+    expect(g.phase).toBe("main2");
+    return { g, me, opp };
+  }
+
+  it("with the setting on, a usable instant stops you at the opponent's end step", () => {
+    let { g, me, opp } = atMyMain2([SHOCK], true);
+    g = pass(g, me); // end main 2
+    expect(g.phase).toBe("end");
+    expect(g.activePlayerId).toBe(me);
+    expect(g.priorityPlayerId).toBe(opp);
+
+    g = pass(g, opp); // they decline: on to their turn
+    expect(g.turnNumber).toBe(2);
+    expect(g.phase).toBe("main1");
+  });
+
+  it("with the setting off, the end step passes on its own", () => {
+    let { g, me } = atMyMain2([SHOCK], false);
+    g = pass(g, me);
+    expect(g.turnNumber).toBe(2);
+  });
+
+  it("with the setting on but nothing castable, there's no stop", () => {
+    let { g, me } = atMyMain2([BEAR], true);
+    g = pass(g, me);
+    expect(g.turnNumber).toBe(2);
+  });
+
+  it("only stops on the OPPONENT's end step, not your own", () => {
+    let { g, me, opp } = atMyMain2([SHOCK], true);
+    g = setEndStepStop(g, me, true);
+    g = setHand(g, me, [SHOCK]);
+    g = addPermanent(g, me, MOUNTAIN).state;
+    g = pass(g, me);
+    expect(g.phase).toBe("end");
+    expect(g.priorityPlayerId).toBe(opp); // only they were stopped
   });
 });
 

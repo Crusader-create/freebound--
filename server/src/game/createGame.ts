@@ -72,6 +72,7 @@ function createPlayer(seat: PlayerSeat): Player {
     mulligansTaken: 0,
     keptHand: false,
     landsPlayedThisTurn: 0,
+    stopAtOpponentEndStep: false,
   };
 }
 
