@@ -14,6 +14,12 @@
   --attack: #b23a3a;
   --block: #3f6fb5;
   --danger: #c74a4a;
+  --hover: #30453a; /* button hover background */
+  --on-accent: #1a1206; /* text on a brass button */
+  --hurt-ink: #f0a0a0; /* damaged creatures, attack tags, errors */
+  --block-ink: #b7cdf0; /* blocking tags */
+  --card-back: #2f2a24; /* card placeholder before its image loads */
+  --shadow: rgba(0, 0, 0, 0.55);
 
   --card-w: 96px;
   --card-h: 134px;
@@ -53,7 +59,7 @@ button {
   cursor: pointer;
 }
 button:hover:not(:disabled) {
-  background: #30453a;
+  background: var(--hover);
 }
 button:disabled {
   opacity: 0.4;
@@ -66,7 +72,7 @@ button:focus-visible {
 button.primary {
   background: var(--brass);
   border-color: var(--brass);
-  color: #1a1206;
+  color: var(--on-accent);
   font-weight: 600;
 }
 button.primary:hover:not(:disabled) {
@@ -143,7 +149,7 @@ select:focus {
 .lobby .errors {
   margin: 14px 0 0;
   padding: 0 0 0 18px;
-  color: #e08a8a;
+  color: var(--hurt-ink);
 }
 .lobby .decks {
   display: flex;
@@ -154,6 +160,102 @@ select:focus {
 
 .lobby .music-slot {
   margin-left: auto;
+}
+
+/* ---------- themes ----------
+ * Each theme only swaps the color variables above. The lobby's picker sets
+ * data-theme on <html>; "felt" (the :root values) is the default.
+ */
+
+[data-theme="midnight"] {
+  --felt: #0d1220;
+  --felt-2: #161d30;
+  --felt-3: #212a42;
+  --rail: #3a4766;
+  --rail-2: #56658a;
+  --ink: #e4e8f2;
+  --ink-2: #a9b2c8;
+  --ink-3: #6f7891;
+  --brass: #8fb3ff;
+  --brass-2: #b5ccff;
+  --hover: #273150;
+  --on-accent: #0b1230;
+  --block-ink: #c9d8ff;
+  --card-back: #1f2638;
+}
+
+[data-theme="ember"] {
+  --felt: #1a100d;
+  --felt-2: #261814;
+  --felt-3: #33211b;
+  --rail: #6b3a24;
+  --rail-2: #8c5236;
+  --ink: #f1e2d3;
+  --ink-2: #c4ad98;
+  --ink-3: #8a7563;
+  --brass: #e3793b;
+  --brass-2: #f39a63;
+  --hover: #40291f;
+  --on-accent: #1f0d04;
+  --card-back: #2e1d16;
+}
+
+[data-theme="parchment"] {
+  --felt: #ece3cf;
+  --felt-2: #f6efdf;
+  --felt-3: #e2d6bb;
+  --rail: #9b7b55;
+  --rail-2: #b89a72;
+  --ink: #2a2118;
+  --ink-2: #5b4c3b;
+  --ink-3: #85745d;
+  --brass: #7a2e22;
+  --brass-2: #943a2c;
+  --attack: #a3302a;
+  --block: #2f5b9c;
+  --danger: #a3302a;
+  --hover: #e6d9bd;
+  --on-accent: #f8efe0;
+  --hurt-ink: #a3302a;
+  --block-ink: #2f5b9c;
+  --card-back: #e6dcc6;
+  --shadow: rgba(60, 40, 20, 0.22);
+}
+
+/* ---------- lobby theme picker ---------- */
+
+.lobby .themes {
+  margin-top: 26px;
+}
+.lobby .themes h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin: 0 0 8px;
+}
+.lobby .theme-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.lobby .theme-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lobby .theme-option[aria-pressed="true"] {
+  border-color: var(--brass);
+  box-shadow: 0 0 0 1px var(--brass);
+}
+.lobby .swatch {
+  display: flex;
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid var(--rail-2);
+}
+.lobby .swatch span {
+  width: 10px;
+  height: 16px;
 }
 
 /* ---------- table ---------- */
@@ -294,13 +396,13 @@ select:focus {
   border-radius: 5px;
   display: block;
   object-fit: cover;
-  background: #2b2b2b;
+  background: var(--card-back);
 }
 .card-text {
   width: var(--card-w);
   height: var(--card-h);
   border-radius: 5px;
-  background: #2f2a24;
+  background: var(--card-back);
   border: 1px solid var(--rail-2);
   color: var(--ink);
   font-size: 11px;
@@ -354,7 +456,7 @@ select:focus {
   border: 1px solid var(--rail-2);
 }
 .perm .pt.hurt {
-  color: #f0a0a0;
+  color: var(--hurt-ink);
 }
 .perm .tag {
   position: absolute;
@@ -367,10 +469,10 @@ select:focus {
   color: var(--ink-2);
 }
 .perm.attacking .tag {
-  color: #f3b2b2;
+  color: var(--hurt-ink);
 }
 .perm.blocking .tag {
-  color: #b7cdf0;
+  color: var(--block-ink);
 }
 .perm.pickable {
   cursor: pointer;
@@ -395,7 +497,7 @@ select:focus {
   width: 240px;
   height: 335px;
   border-radius: 10px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 12px 30px var(--shadow);
   pointer-events: none;
 }
 .zoom:hover .big {
@@ -443,7 +545,7 @@ select:focus {
   width: var(--hand-card-w);
   height: var(--hand-card-h);
   border-radius: 7px;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 6px 16px var(--shadow);
 }
 .hand-card:hover {
   transform: translateY(-22px);
@@ -467,10 +569,10 @@ select:focus {
 }
 .hand-card.playable .card,
 .hand-card.playable .card-text {
-  box-shadow: 0 0 0 2px var(--brass), 0 6px 16px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 2px var(--brass), 0 6px 16px var(--shadow);
 }
 .hand-card.picked .card {
-  box-shadow: 0 0 0 3px var(--brass), 0 6px 16px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 3px var(--brass), 0 6px 16px var(--shadow);
 }
 
 /* ---------- prompt panel ---------- */

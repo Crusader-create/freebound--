@@ -7,6 +7,7 @@ import type {
 } from "../../shared/src/types";
 import { SAMPLE_DECKS } from "./sampleDecks";
 import { socket } from "./socket";
+import { applyTheme, loadTheme, THEMES, type ThemeId } from "./themes";
 import { loadMusicPref, saveMusicPref, startMusic, stopMusic } from "./music";
 
 type DeckError = { code: string; message: string };
@@ -222,6 +223,12 @@ export default function App() {
   const [discards, setDiscards] = useState<string[]>([]);
   const [showLog, setShowLog] = useState(loadLogPref);
   const [musicOn, setMusicOn] = useState(loadMusicPref);
+  const [theme, setTheme] = useState<ThemeId>(loadTheme);
+
+  function chooseTheme(id: ThemeId) {
+    setTheme(id);
+    applyTheme(id);
+  }
   const [endStop, setEndStop] = useState(loadEndStopPref);
 
   function toggleEndStop() {
@@ -407,6 +414,27 @@ export default function App() {
               ))}
             </ul>
           )}
+          {/* Themes can only be changed here, not during a match. */}
+          <div className="themes">
+            <h2>Table theme</h2>
+            <div className="theme-options">
+              {THEMES.map((t) => (
+                <button
+                  key={t.id}
+                  className="theme-option"
+                  aria-pressed={theme === t.id}
+                  onClick={() => chooseTheme(t.id)}
+                >
+                  <span className="swatch" aria-hidden>
+                    {t.swatch.map((color) => (
+                      <span key={color} style={{ background: color }} />
+                    ))}
+                  </span>
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     );
