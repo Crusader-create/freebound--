@@ -262,14 +262,18 @@ describe("declaring blockers", () => {
     expect(declareBlockers(s, [block(theirIds[0], mineIds[1])]).ok).toBe(false);
   });
 
-  it("each attacker can be blocked by only one creature", () => {
+  it("several creatures can block the same attacker", () => {
     const { state, mineIds, theirIds } = setup(
       [{ card: ATTACKER }, { card: ATTACKER }],
       [{ card: BLOCKER }, { card: BLOCKER }]
     );
     const s = toBlockers(state, mineIds);
     const doubleBlock = [block(theirIds[0], mineIds[0]), block(theirIds[1], mineIds[0])];
-    expect(declareBlockers(s, doubleBlock).ok).toBe(false);
+    const result = unwrap(declareBlockers(s, doubleBlock));
+    const attacker = result.players
+      .flatMap((pl) => pl.battlefield)
+      .find((c) => c.instanceId === mineIds[0])!;
+    expect(attacker.blockedBy).toEqual([theirIds[0], theirIds[1]]);
 
     const oneEach = [block(theirIds[0], mineIds[0]), block(theirIds[1], mineIds[1])];
     expect(declareBlockers(s, oneEach).ok).toBe(true);
@@ -527,5 +531,118 @@ describe("lifelink", () => {
     const end = fight(state, mineIds, [block(theirIds[0], mineIds[0])], "end_of_combat");
 
     expect(life(end, opp)).toBe(22);
+  });
+});
+
+describe("multiple blockers", () => {
+  it("two blockers gang up and kill a bigger attacker", () => {
+    const big = fakeCreature("Big", 3, 3);
+    const { state, me, opp, mineIds, theirIds } = setup(
+      [{ card: big }],
+      [{ card: BLOCKER }, { card: BLOCKER }]
+    );
+    const end = fight(
+      state,
+      mineIds,
+      [block(theirIds[0], mineIds[0]), block(theirIds[1], mineIds[0])],
+      "end_of_combat"
+    );
+
+    expect(graveyard(end, me)).toContain("Big"); // took 2 + 2
+    // 3 damage: 2 kills one blocker, the leftover 1 lands on the other.
+    expect(graveyard(end, opp)).toEqual(["Blocker"]);
+    expect(getPlayer(end, opp).battlefield[0].damageMarked).toBe(1);
+    expect(life(end, opp)).toBe(20);
+  });
+
+  it("the attacker kills the blockers it can, cheapest first", () => {
+    const big = fakeCreature("Big", 4, 6);
+    const small = fakeCreature("Small", 1, 1);
+    const wall = fakeCreature("Wall", 0, 5);
+    const { state, opp, mineIds, theirIds } = setup([{ card: big }], [{ card: wall }, { card: small }]);
+    const end = fight(
+      state,
+      mineIds,
+      [block(theirIds[0], mineIds[0]), block(theirIds[1], mineIds[0])],
+      "end_of_combat"
+    );
+
+    expect(graveyard(end, opp)).toEqual(["Small"]); // 1 to Small, 3 to Wall
+    expect(battlefield(end, opp)).toEqual(["Wall"]);
+    expect(getPlayer(end, opp).battlefield[0].damageMarked).toBe(3);
+  });
+
+  it("trample: lethal to every blocker, the rest to the player", () => {
+    const trampler = fakeCreature("Trampler", 5, 5, "Trample");
+    const { state, opp, mineIds, theirIds } = setup(
+      [{ card: trampler }],
+      [{ card: BLOCKER }, { card: BLOCKER }]
+    );
+    const end = fight(
+      state,
+      mineIds,
+      [block(theirIds[0], mineIds[0]), block(theirIds[1], mineIds[0])],
+      "end_of_combat"
+    );
+
+    expect(graveyard(end, opp)).toEqual(["Blocker", "Blocker"]);
+    expect(life(end, opp)).toBe(19);
+  });
+
+  it("deathtouch: 1 damage to each blocker is enough", () => {
+    const toucher = fakeCreature("Toucher", 2, 5, "Deathtouch");
+    const big = fakeCreature("Big", 1, 6);
+    const { state, opp, mineIds, theirIds } = setup([{ card: toucher }], [{ card: big }, { card: big }]);
+    const end = fight(
+      state,
+      mineIds,
+      [block(theirIds[0], mineIds[0]), block(theirIds[1], mineIds[0])],
+      "end_of_combat"
+    );
+
+    expect(graveyard(end, opp)).toEqual(["Big", "Big"]);
+  });
+
+  it("if one blocker is removed, the attacker's damage all goes to the other", () => {
+    const big = fakeCreature("Big", 4, 4);
+    const { state, opp, mineIds, theirIds } = setup(
+      [{ card: big }],
+      [{ card: BLOCKER }, { card: fakeCreature("Tough", 1, 5) }]
+    );
+    let s = toBlockers(state, mineIds);
+    s = unwrap(declareBlockers(s, [block(theirIds[0], mineIds[0]), block(theirIds[1], mineIds[0])]));
+    s = destroyPermanent(s, theirIds[0]);
+
+    const after = passUntil(s, (x) => x.phase === "end_of_combat");
+    expect(getPlayer(after, opp).battlefield.find((c) => c.card.name === "Tough")!.damageMarked).toBe(4);
+    expect(life(after, opp)).toBe(20);
+  });
+
+  it("first strike: a first-strike attacker kills one blocker before it can hit back", () => {
+    const striker = fakeCreature("Striker", 2, 3, "First strike");
+    const { state, me, opp, mineIds, theirIds } = setup(
+      [{ card: striker }],
+      [{ card: BLOCKER }, { card: BLOCKER }]
+    );
+    const end = fight(
+      state,
+      mineIds,
+      [block(theirIds[0], mineIds[0]), block(theirIds[1], mineIds[0])],
+      "end_of_combat"
+    );
+
+    expect(graveyard(end, opp)).toEqual(["Blocker"]);
+    // Only the surviving blocker deals 2, so the 2/3 striker lives.
+    expect(battlefield(end, me)).toContain("Striker");
+  });
+
+  it("the log names every blocker", () => {
+    const big = fakeCreature("Big", 3, 3);
+    const { state, mineIds, theirIds } = setup([{ card: big }], [{ card: BLOCKER }, { card: BLOCKER }]);
+    const s = toBlockers(state, mineIds);
+    const after = unwrap(
+      declareBlockers(s, [block(theirIds[0], mineIds[0]), block(theirIds[1], mineIds[0])])
+    );
+    expect(after.log.at(-1)!.text).toContain("Blocker and Blocker blocked Big");
   });
 });

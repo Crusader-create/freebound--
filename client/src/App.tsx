@@ -457,7 +457,7 @@ export default function App() {
         return (
           <>
             <h2>Choose your blockers</h2>
-            <p>Each of your creatures can block one attacker.</p>
+            <p>Each of your creatures can block one attacker. Several can block the same one.</p>
             {able.map((b) => (
               <div className="block-row" key={b.instanceId}>
                 <CardImage card={b.card} />

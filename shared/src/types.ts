@@ -57,7 +57,7 @@ export type BattlefieldCard = CardInstance & {
   toughnessModifier: number; // same; effective toughness = card.toughness + this
   attacking: boolean;
   blockingInstanceId?: string; // which attacker this creature is blocking
-  blockedBy?: string; // on an attacker: its blocker. Stays set even if the blocker dies
+  blockedBy?: string[]; // on an attacker: its blockers, in the order declared. Stays set even if they die
 };
 
 // ---------- Players ----------

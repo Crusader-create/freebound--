@@ -161,9 +161,6 @@ export function declareBlockers(
   if (new Set(blocks.map((b) => b.blockerId)).size !== blocks.length) {
     return fail("A creature can only block once.");
   }
-  if (new Set(blocks.map((b) => b.attackerId)).size !== blocks.length) {
-    return fail("Each attacker can only be blocked by one creature for now.");
-  }
 
   for (const { blockerId, attackerId } of blocks) {
     const blocker = defenderSide.battlefield.find((p) => p.instanceId === blockerId);
@@ -177,13 +174,17 @@ export function declareBlockers(
     }
   }
 
-  const blockerFor = new Map(blocks.map((b) => [b.attackerId, b.blockerId]));
+  // Several creatures may block the same attacker, so each attacker gets a list.
+  const blockersFor = new Map<string, string[]>();
+  for (const { blockerId, attackerId } of blocks) {
+    blockersFor.set(attackerId, [...(blockersFor.get(attackerId) ?? []), blockerId]);
+  }
   const attackerFor = new Map(blocks.map((b) => [b.blockerId, b.attackerId]));
 
   let next = replacePlayer(state, {
     ...attackerSide,
     battlefield: attackerSide.battlefield.map((p) =>
-      blockerFor.has(p.instanceId) ? { ...p, blockedBy: blockerFor.get(p.instanceId) } : p
+      blockersFor.has(p.instanceId) ? { ...p, blockedBy: blockersFor.get(p.instanceId) } : p
     ),
   });
   next = replacePlayer(next, {
@@ -195,10 +196,12 @@ export function declareBlockers(
     ),
   });
 
-  const lines = blocks.map(({ blockerId, attackerId }) => {
-    const blocker = defenderSide.battlefield.find((c) => c.instanceId === blockerId)!;
-    const attacker = attackerSide.battlefield.find((c) => c.instanceId === attackerId)!;
-    return `${blocker.card.name} blocked ${attacker.card.name}`;
+  const nameOf = (side: typeof defenderSide, id: string) =>
+    side.battlefield.find((c) => c.instanceId === id)!.card.name;
+  const lines = [...blockersFor].map(([attackerId, blockerIds]) => {
+    const names = blockerIds.map((id) => nameOf(defenderSide, id));
+    const who = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+    return `${who} blocked ${nameOf(attackerSide, attackerId)}`;
   });
   const line =
     blocks.length === 0 ? `${p(playerId)} didn't block.` : `${p(playerId)}: ${lines.join("; ")}.`;
@@ -243,6 +246,47 @@ function lethalDamage(blocker: BattlefieldCard, attacker: BattlefieldCard): numb
 }
 
 /**
+ * Splits a blocked attacker's damage among its blockers, the way the attacking
+ * player usually would: kill as many blockers as possible, cheapest first.
+ * Each one gets lethal damage in turn. Anything left over goes to the player
+ * if the attacker has trample, otherwise onto the last blocker it reached.
+ * (Arena lets you divide this by hand; we pick the usual best split for you.)
+ */
+function assignAttackerDamage(
+  attacker: BattlefieldCard,
+  power: number,
+  blockers: BattlefieldCard[],
+  defenderId: string,
+  trample: boolean
+): Hit[] {
+  const order = [...blockers].sort(
+    (a, b) => lethalDamage(a, attacker) - lethalDamage(b, attacker)
+  );
+  const amounts = new Map<string, number>();
+  let remaining = power;
+  for (const blocker of order) {
+    if (remaining <= 0) break;
+    const amount = Math.min(remaining, lethalDamage(blocker, attacker));
+    amounts.set(blocker.instanceId, amount);
+    remaining -= amount;
+  }
+
+  const toPlayer = remaining > 0 && trample ? remaining : 0;
+  if (remaining > 0 && !trample) {
+    const last = order[order.length - 1].instanceId;
+    amounts.set(last, (amounts.get(last) ?? 0) + remaining);
+  }
+
+  const hits: Hit[] = [];
+  for (const blocker of order) {
+    const amount = amounts.get(blocker.instanceId) ?? 0;
+    if (amount > 0) hits.push({ source: attacker, to: { permanentId: blocker.instanceId }, amount });
+  }
+  if (toPlayer > 0) hits.push({ source: attacker, to: { playerId: defenderId }, amount: toPlayer });
+  return hits;
+}
+
+/**
  * Deals one step of combat damage. In the first strike step only creatures
  * with first strike deal damage; in the regular step, only creatures WITHOUT
  * it do (the others already dealt theirs).
@@ -262,38 +306,29 @@ export function dealCombatDamage(
     if (!attacker.attacking) continue;
 
     const power = effectivePower(attacker);
-    const blocker =
-      attacker.blockedBy !== undefined
-        ? defender.battlefield.find((b) => b.instanceId === attacker.blockedBy)
-        : undefined;
+    const blocked = attacker.blockedBy !== undefined;
+    // Blockers that are still on the battlefield (some may have died or been removed).
+    const blockers = (attacker.blockedBy ?? [])
+      .map((id) => defender.battlefield.find((b) => b.instanceId === id))
+      .filter((b): b is BattlefieldCard => b !== undefined);
     const trample = hasKeyword(attacker.card, "trample");
 
     if (deals(attacker) && power > 0) {
-      if (attacker.blockedBy === undefined) {
+      if (!blocked) {
         // Unblocked: all the damage goes to the defending player.
         hits.push({ source: attacker, to: { playerId: defender.id }, amount: power });
-      } else if (blocker) {
-        if (trample) {
-          // Assign lethal damage to the blocker, the rest to the player.
-          const toBlocker = Math.min(power, lethalDamage(blocker, attacker));
-          if (toBlocker > 0) {
-            hits.push({ source: attacker, to: { permanentId: blocker.instanceId }, amount: toBlocker });
-          }
-          if (power - toBlocker > 0) {
-            hits.push({ source: attacker, to: { playerId: defender.id }, amount: power - toBlocker });
-          }
-        } else {
-          hits.push({ source: attacker, to: { permanentId: blocker.instanceId }, amount: power });
-        }
+      } else if (blockers.length > 0) {
+        hits.push(...assignAttackerDamage(attacker, power, blockers, defender.id, trample));
       } else if (trample) {
-        // Blocked, but the blocker is gone: a trampler hits the player.
+        // Blocked, but every blocker is gone: a trampler hits the player.
         hits.push({ source: attacker, to: { playerId: defender.id }, amount: power });
       }
-      // Blocked, blocker gone, no trample: no damage is dealt.
+      // Blocked, blockers gone, no trample: no damage is dealt.
     }
 
-    // The blocker (if it's still there) hits back.
-    if (blocker && deals(blocker)) {
+    // Each blocker that's still there hits back.
+    for (const blocker of blockers) {
+      if (!deals(blocker)) continue;
       const blockerPower = effectivePower(blocker);
       if (blockerPower > 0) {
         hits.push({ source: blocker, to: { permanentId: attacker.instanceId }, amount: blockerPower });
