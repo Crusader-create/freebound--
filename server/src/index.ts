@@ -10,6 +10,7 @@ import { createGame, toView } from "./game/createGame";
 import { isBlockAssignment, type BlockAssignment } from "./game/combat";
 import { isTarget } from "./game/effects";
 import { autoAdvance, processCommand, type GameCommand } from "./game/engine";
+import { log, p } from "./game/log";
 import { keepHand, takeMulligan } from "./game/mulligan";
 import { opponentOf } from "./game/stateHelpers";
 import { MatchmakingQueue, type QueueEntry } from "./matchmaking";
@@ -157,13 +158,17 @@ function forfeit(session: Session) {
   const game = session.gameId ? games.get(session.gameId) : undefined;
   if (!game || game.status === "finished") return;
 
-  const ended: GameState = {
-    ...game,
-    status: "finished",
-    winnerId: opponentOf(game, session.playerId).id,
-    endReason: "disconnect",
-    awaiting: null,
-  };
+  const winner = opponentOf(game, session.playerId).id;
+  const ended: GameState = log(
+    {
+      ...game,
+      status: "finished",
+      winnerId: winner,
+      endReason: "disconnect",
+      awaiting: null,
+    },
+    `${p(session.playerId)} left the game. ${p(winner)} won the game.`
+  );
   games.set(game.gameId, ended);
   sendState(ended);
   endGame(ended);

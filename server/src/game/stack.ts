@@ -21,8 +21,11 @@ import type {
   CardInstance,
   GameState,
   StackObject,
+  Target,
 } from "../../../shared/src/types";
 import { applyEffect, effectTargetSpec, getSpellEffect, targetProblem } from "./effects";
+import { log, p, P } from "./log";
+import { findPermanent } from "./permanents";
 import { getPlayer, replacePlayer } from "./stateHelpers";
 import {
   describeTrigger,
@@ -54,10 +57,13 @@ function resolveSpell(state: GameState, spell: StackObject): GameState {
       toughnessModifier: 0,
       attacking: false,
     };
-    const entered = replacePlayer(state, {
-      ...controller,
-      battlefield: [...controller.battlefield, permanent],
-    });
+    const entered = log(
+      replacePlayer(state, {
+        ...controller,
+        battlefield: [...controller.battlefield, permanent],
+      }),
+      `${P(controller.id)} ${card.card.name} entered the battlefield.`
+    );
 
     // The creature's "enters" trigger, if it has one, is queued: it will be
     // put on the stack after state-based actions, not resolved right now.
@@ -81,13 +87,40 @@ function resolveSpell(state: GameState, spell: StackObject): GameState {
   let next = state;
   const effect = getSpellEffect(card.card);
   const target = spell.targets[0];
+  const name = card.card.name;
   if (effect && target && targetProblem(next, effectTargetSpec(effect), target) === null) {
+    const what = describeTargetNow(next, target);
     next = applyEffect(next, effect, target);
+    switch (effect.kind) {
+      case "damage":
+        next = log(next, `${name} dealt ${effect.amount} damage to ${what}.`);
+        break;
+      case "pump": {
+        const sign = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
+        next = log(next, `${what} got ${sign(effect.power)}/${sign(effect.toughness)} until end of turn.`);
+        break;
+      }
+      case "destroy":
+        next = log(next, `${name} destroyed ${what}.`);
+        break;
+    }
+  } else {
+    // The target is gone or illegal: the spell fizzles.
+    next = log(next, `${name} had no legal target and did nothing.`);
   }
-  // (If the target was illegal the spell fizzles: no effect, same graveyard.)
 
   const owner = getPlayer(next, card.ownerId);
   return replacePlayer(next, { ...owner, graveyard: [...owner.graveyard, card] });
+}
+
+/** A target as it reads in the log, looked up at resolution time. */
+function describeTargetNow(state: GameState, target: Target): string {
+  if (target.kind === "player") return p(target.playerId);
+  if (target.kind === "permanent") {
+    const found = findPermanent(state, target.instanceId);
+    return found ? `${P(found.controller.id)} ${found.permanent.card.name}` : "a creature";
+  }
+  return "a spell";
 }
 
 /** Removes the top object from the stack and resolves it. */

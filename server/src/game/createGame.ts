@@ -93,6 +93,7 @@ export function createGame(seatA: PlayerSeat, seatB: PlayerSeat): GameState {
     stack: [],
     pendingTriggers: [],
     actedThisStep: false,
+    log: [],
     winnerId: null,
     endReason: null,
   };

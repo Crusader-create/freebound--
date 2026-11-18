@@ -540,6 +540,38 @@ select:focus {
 .panel .notice.error {
   border-left-color: var(--danger);
 }
+.panel .log {
+  flex: 1 1 160px;
+  min-height: 120px;
+  overflow-y: auto;
+  border-top: 1px solid var(--rail);
+  padding-top: 10px;
+}
+.panel .log h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  color: var(--ink-2);
+}
+.panel .log ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.panel .log li {
+  padding: 2px 0;
+}
+.panel .log li.new-turn {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--felt-3);
+}
+.panel .log .log-empty {
+  font-size: 14px;
+  color: var(--ink-3);
+}
 .panel .result {
   font-size: 34px;
   font-weight: 600;

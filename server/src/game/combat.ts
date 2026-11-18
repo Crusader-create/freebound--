@@ -28,9 +28,11 @@
 
 import type { BattlefieldCard, GameState } from "../../../shared/src/types";
 import { hasKeyword } from "./keywords";
+import { log, p, P } from "./log";
 import {
   effectivePower,
   effectiveToughness,
+  findPermanent,
   updatePermanent,
 } from "./permanents";
 import { getPlayer, opponentOf, replacePlayer } from "./stateHelpers";
@@ -120,15 +122,27 @@ export function declareAttackers(
     ),
   });
 
+  const names = player.battlefield
+    .filter((c) => chosen.has(c.instanceId))
+    .map((c) => c.card.name)
+    .join(", ");
+  const line =
+    attackerIds.length === 0
+      ? `${p(playerId)} didn't attack.`
+      : `${p(playerId)} attacked with ${names}.`;
+
   // The declaration is made; now the active player gets priority.
   return {
     ok: true,
-    state: {
-      ...updated,
-      awaiting: null,
-      priorityPlayerId: updated.activePlayerId,
-      consecutivePasses: 0,
-    },
+    state: log(
+      {
+        ...updated,
+        awaiting: null,
+        priorityPlayerId: updated.activePlayerId,
+        consecutivePasses: 0,
+      },
+      line
+    ),
   };
 }
 
@@ -181,14 +195,25 @@ export function declareBlockers(
     ),
   });
 
+  const lines = blocks.map(({ blockerId, attackerId }) => {
+    const blocker = defenderSide.battlefield.find((c) => c.instanceId === blockerId)!;
+    const attacker = attackerSide.battlefield.find((c) => c.instanceId === attackerId)!;
+    return `${blocker.card.name} blocked ${attacker.card.name}`;
+  });
+  const line =
+    blocks.length === 0 ? `${p(playerId)} didn't block.` : `${p(playerId)}: ${lines.join("; ")}.`;
+
   return {
     ok: true,
-    state: {
-      ...next,
-      awaiting: null,
-      priorityPlayerId: next.activePlayerId,
-      consecutivePasses: 0,
-    },
+    state: log(
+      {
+        ...next,
+        awaiting: null,
+        priorityPlayerId: next.activePlayerId,
+        consecutivePasses: 0,
+      },
+      line
+    ),
   };
 }
 
@@ -279,11 +304,16 @@ export function dealCombatDamage(
   // 2. Apply them all.
   let next = state;
   for (const hit of hits) {
+    const source = hit.source.card.name;
     if ("playerId" in hit.to) {
       const player = getPlayer(next, hit.to.playerId);
-      next = replacePlayer(next, { ...player, life: player.life - hit.amount });
+      next = log(
+        replacePlayer(next, { ...player, life: player.life - hit.amount }),
+        `${source} dealt ${hit.amount} damage to ${p(player.id)}.`
+      );
     } else {
       const deathtouch = hasKeyword(hit.source.card, "deathtouch");
+      const victim = findPermanent(next, hit.to.permanentId);
       next = updatePermanent(next, hit.to.permanentId, (p) => {
         const damage = p.damageMarked + hit.amount;
         return {
@@ -291,11 +321,20 @@ export function dealCombatDamage(
           damageMarked: deathtouch ? Math.max(damage, effectiveToughness(p)) : damage,
         };
       });
+      if (victim) {
+        next = log(
+          next,
+          `${source} dealt ${hit.amount} damage to ${P(victim.controller.id)} ${victim.permanent.card.name}.`
+        );
+      }
     }
 
     if (hasKeyword(hit.source.card, "lifelink")) {
       const controller = getPlayer(next, hit.source.controllerId);
-      next = replacePlayer(next, { ...controller, life: controller.life + hit.amount });
+      next = log(
+        replacePlayer(next, { ...controller, life: controller.life + hit.amount }),
+        `${source}'s lifelink: ${p(controller.id)} gained ${hit.amount} life.`
+      );
     }
   }
   return next;

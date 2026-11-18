@@ -30,6 +30,8 @@ import type {
   Target,
 } from "../../../shared/src/types";
 import { applyEffect, targetProblem } from "./effects";
+import { log, p, P } from "./log";
+import { findPermanent } from "./permanents";
 import { getPlayer, replacePlayer } from "./stateHelpers";
 
 export type TriggerEffect =
@@ -154,33 +156,59 @@ export function resolveTrigger(
   const effect = getEtbTrigger(trigger.source.card);
   if (!effect) return state;
   const controller = getPlayer(state, trigger.controllerId);
+  const name = trigger.source.card.name;
 
   switch (effect.kind) {
     case "draw": {
       const drawn = controller.library.slice(0, effect.count);
-      return replacePlayer(state, {
-        ...controller,
-        hand: [...controller.hand, ...drawn],
-        library: controller.library.slice(effect.count),
-      });
+      const cards = drawn.length === 1 ? "a card" : `${drawn.length} cards`;
+      return log(
+        replacePlayer(state, {
+          ...controller,
+          hand: [...controller.hand, ...drawn],
+          library: controller.library.slice(effect.count),
+        }),
+        `${name}: ${p(controller.id)} drew ${cards}.`
+      );
       // Drawing from an empty library here doesn't lose the game until the
       // draw step; that matches the simplified SBA set we have for now.
     }
 
     case "gain_life":
-      return replacePlayer(state, { ...controller, life: controller.life + effect.amount });
+      return log(
+        replacePlayer(state, { ...controller, life: controller.life + effect.amount }),
+        `${name}: ${p(controller.id)} gained ${effect.amount} life.`
+      );
 
     case "damage": {
       const target: Target | undefined = trigger.targets[0];
       // If the target is gone, the ability fizzles.
-      if (!target || targetProblem(state, "any", target) !== null) return state;
-      return applyEffect(state, { kind: "damage", amount: effect.amount, target: "any" }, target);
+      if (!target || targetProblem(state, "any", target) !== null) {
+        return log(state, `${name}'s ability had no legal target and did nothing.`);
+      }
+      const what = describeTargetForLog(state, target);
+      return log(
+        applyEffect(state, { kind: "damage", amount: effect.amount, target: "any" }, target),
+        `${name} dealt ${effect.amount} damage to ${what}.`
+      );
     }
 
     case "token":
-      return replacePlayer(state, {
-        ...controller,
-        battlefield: [...controller.battlefield, makeToken(controller.id, newId(), effect)],
-      });
+      return log(
+        replacePlayer(state, {
+          ...controller,
+          battlefield: [...controller.battlefield, makeToken(controller.id, newId(), effect)],
+        }),
+        `${name}: ${p(controller.id)} created a ${effect.power}/${effect.toughness} ${effect.name} token.`
+      );
   }
+}
+
+function describeTargetForLog(state: GameState, target: Target): string {
+  if (target.kind === "player") return p(target.playerId);
+  if (target.kind === "permanent") {
+    const found = findPermanent(state, target.instanceId);
+    return found ? `${P(found.controller.id)} ${found.permanent.card.name}` : "a creature";
+  }
+  return "a spell";
 }

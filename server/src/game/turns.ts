@@ -28,6 +28,7 @@ import {
   eligibleBlockers,
   hasFirstStrikeInCombat,
 } from "./combat";
+import { log, p, P } from "./log";
 import { resolveTopOfStack } from "./stack";
 import { getPlayer, opponentOf, replacePlayer } from "./stateHelpers";
 
@@ -86,20 +87,27 @@ function drawStep(state: GameState): GameState {
 
   const active = getPlayer(base, base.activePlayerId);
   if (active.library.length === 0) {
-    return {
-      ...base,
-      status: "finished",
-      winnerId: opponentOf(base, active.id).id,
-      endReason: "decked",
-    };
+    return log(
+      {
+        ...base,
+        status: "finished",
+        winnerId: opponentOf(base, active.id).id,
+        endReason: "decked",
+      },
+      `${p(active.id)} tried to draw from an empty library. ${p(opponentOf(base, active.id).id)} won the game.`
+    );
   }
 
   const [top, ...rest] = active.library; // library[0] is the top
-  return replacePlayer(base, {
-    ...active,
-    hand: [...active.hand, top],
-    library: rest,
-  });
+  // "a card", never its name: the drawn card is hidden information.
+  return log(
+    replacePlayer(base, {
+      ...active,
+      hand: [...active.hand, top],
+      library: rest,
+    }),
+    `${p(active.id)} drew a card.`
+  );
 }
 
 /**
@@ -138,14 +146,12 @@ export function finishCleanup(state: GameState): GameState {
   );
 
   const nextActive = opponentOf(cleaned, cleaned.activePlayerId);
-  return enterStep(
-    {
-      ...cleaned,
-      activePlayerId: nextActive.id,
-      turnNumber: cleaned.turnNumber + 1,
-    },
-    "untap"
-  );
+  const nextTurn: GameState = {
+    ...cleaned,
+    activePlayerId: nextActive.id,
+    turnNumber: cleaned.turnNumber + 1,
+  };
+  return enterStep(log(nextTurn, `Turn ${nextTurn.turnNumber}: ${P(nextActive.id)} turn.`), "untap");
 }
 
 /** Starts a step where players get priority, active player first. */
@@ -222,7 +228,11 @@ export function enterStep(state: GameState, step: Phase): GameState {
 
 /** Begins turn 1. Called once both players have kept their hands. */
 export function startFirstTurn(state: GameState): GameState {
-  return enterStep(state, "untap");
+  const first = state.activePlayerId;
+  return enterStep(
+    log(state, `Turn 1: ${P(first)} turn. The game begins.`),
+    "untap"
+  );
 }
 
 // ---------- moving between steps ----------

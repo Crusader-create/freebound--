@@ -33,6 +33,8 @@ import {
 } from "./combat";
 import { hasSomethingToDo } from "./autoPass";
 import { effectTargetSpec, getSpellEffect, targetProblem } from "./effects";
+import { log, p, P } from "./log";
+import { findPermanent } from "./permanents";
 import { parseManaCost, planPayment } from "./mana";
 import { applyStateBasedActions } from "./sba";
 import { findPlayer, getPlayer, opponentOf, replacePlayer } from "./stateHelpers";
@@ -56,6 +58,16 @@ export type CommandResult =
 
 function fail(reason: string): CommandResult {
   return { ok: false, reason };
+}
+
+/** A target as it should read in the log: a player, or a creature by name. */
+function describeTarget(state: GameState, target: Target): string {
+  if (target.kind === "player") return p(target.playerId);
+  if (target.kind === "permanent") {
+    const found = findPermanent(state, target.instanceId);
+    return found ? `${P(found.controller.id)} ${found.permanent.card.name}` : "a creature";
+  }
+  return "a spell";
 }
 
 /** Why a normal action can't happen while the game waits on a decision. */
@@ -121,7 +133,10 @@ function playLand(
   });
 
   // Playing a land is an action, so any earlier passes no longer count.
-  return { ok: true, state: { ...next, consecutivePasses: 0 } };
+  return {
+    ok: true,
+    state: log({ ...next, consecutivePasses: 0 }, `${p(playerId)} played ${card.card.name}.`),
+  };
 }
 
 /**
@@ -221,9 +236,13 @@ function castSpell(
     ),
   });
 
+  const targetText = chosenTargets[0] ? ` targeting ${describeTarget(state, chosenTargets[0])}` : "";
   return {
     ok: true,
-    state: { ...next, stack: [...next.stack, spell], consecutivePasses: 0 },
+    state: log(
+      { ...next, stack: [...next.stack, spell], consecutivePasses: 0 },
+      `${p(playerId)} cast ${name}${targetText}.`
+    ),
   };
 }
 
@@ -251,14 +270,17 @@ function chooseTriggerTarget(state: GameState, playerId: string, target: Target)
 
   return {
     ok: true,
-    state: {
-      ...state,
-      stack: [...state.stack, ability],
-      pendingTriggers: state.pendingTriggers.slice(1),
-      awaiting: null,
-      priorityPlayerId: state.activePlayerId,
-      consecutivePasses: 0,
-    },
+    state: log(
+      {
+        ...state,
+        stack: [...state.stack, ability],
+        pendingTriggers: state.pendingTriggers.slice(1),
+        awaiting: null,
+        priorityPlayerId: state.activePlayerId,
+        consecutivePasses: 0,
+      },
+      `${pending.source.card.name}'s ability triggered, targeting ${describeTarget(state, target)}.`
+    ),
   };
 }
 
@@ -282,8 +304,12 @@ function discard(state: GameState, playerId: string, cardInstanceIds: string[]):
     hand: player.hand.filter((c) => !chosen.has(c.instanceId)),
     graveyard: [...player.graveyard, ...discarded],
   });
+  const names = discarded.map((c) => c.card.name).join(", ");
   // The discard was the only thing holding up cleanup: finish the turn.
-  return { ok: true, state: finishCleanup({ ...next, awaiting: null }) };
+  return {
+    ok: true,
+    state: finishCleanup(log({ ...next, awaiting: null }, `${p(playerId)} discarded ${names}.`)),
+  };
 }
 
 function concede(state: GameState, playerId: string): CommandResult {
@@ -292,13 +318,16 @@ function concede(state: GameState, playerId: string): CommandResult {
   if (!player) return fail("You're not in this game.");
   return {
     ok: true,
-    state: {
-      ...state,
-      status: "finished",
-      winnerId: opponentOf(state, playerId).id,
-      endReason: "concede",
-      awaiting: null,
-    },
+    state: log(
+      {
+        ...state,
+        status: "finished",
+        winnerId: opponentOf(state, playerId).id,
+        endReason: "concede",
+        awaiting: null,
+      },
+      `${p(playerId)} conceded. ${p(opponentOf(state, playerId).id)} won the game.`
+    ),
   };
 }
 
@@ -351,13 +380,16 @@ export function putTriggersOnStack(state: GameState): GameState {
       targets: [],
       description: pending.description,
     };
-    next = {
-      ...next,
-      stack: [...next.stack, ability],
-      pendingTriggers: next.pendingTriggers.slice(1),
-      priorityPlayerId: next.activePlayerId,
-      consecutivePasses: 0,
-    };
+    next = log(
+      {
+        ...next,
+        stack: [...next.stack, ability],
+        pendingTriggers: next.pendingTriggers.slice(1),
+        priorityPlayerId: next.activePlayerId,
+        consecutivePasses: 0,
+      },
+      `${pending.source.card.name}'s ability triggered.`
+    );
   }
   return next;
 }

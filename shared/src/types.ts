@@ -107,6 +107,18 @@ export type PendingTrigger = {
   needsTarget: boolean;
 };
 
+// ---------- The game log ----------
+
+/**
+ * One line of the game log. `text` uses the placeholder "{p:<playerId>}"
+ * wherever a player is named, so each client can render it as "You" or
+ * "Opponent" from its own seat.
+ */
+export type LogEntry = {
+  turn: number;
+  text: string;
+};
+
 // ---------- Game state ----------
 
 /**
@@ -167,6 +179,12 @@ export type GameState = {
    * game moves on. Cleared whenever a new step begins.
    */
   actedThisStep: boolean;
+  /**
+   * What has happened, in order, written by the engine as it happens. Each
+   * entry names players by id; the client renders them as "you" / "opponent".
+   * Kept in the state so a reconnecting player gets the whole history back.
+   */
+  log: LogEntry[];
   winnerId: string | null;
   endReason: GameEndReason | null;
 };

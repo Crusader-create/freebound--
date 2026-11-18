@@ -16,6 +16,7 @@
  */
 
 import type { GameState } from "../../../shared/src/types";
+import { log, p, P } from "./log";
 import { destroyPermanent, effectiveToughness } from "./permanents";
 import { opponentOf } from "./stateHelpers";
 
@@ -23,14 +24,21 @@ function applyOnce(state: GameState): GameState {
   if (state.status !== "in_progress") return state;
 
   // Players at 0 or less life lose. If both do at once, nobody wins.
-  const losers = state.players.filter((p) => p.life <= 0);
+  const losers = state.players.filter((pl) => pl.life <= 0);
   if (losers.length > 0) {
-    return {
-      ...state,
-      status: "finished",
-      winnerId: losers.length === 1 ? opponentOf(state, losers[0].id).id : null,
-      endReason: "life",
-    };
+    const line =
+      losers.length === 1
+        ? `${p(losers[0].id)} ran out of life. ${p(opponentOf(state, losers[0].id).id)} won the game.`
+        : "Both players ran out of life at once. The game is a draw.";
+    return log(
+      {
+        ...state,
+        status: "finished",
+        winnerId: losers.length === 1 ? opponentOf(state, losers[0].id).id : null,
+        endReason: "life",
+      },
+      line
+    );
   }
 
   // Creatures with lethal damage, or no toughness left, die.
@@ -41,7 +49,10 @@ function applyOnce(state: GameState): GameState {
       if (!permanent.card.types.includes("Creature")) continue;
       const toughness = effectiveToughness(permanent);
       if (toughness <= 0 || permanent.damageMarked >= toughness) {
-        result = destroyPermanent(result, permanent.instanceId);
+        result = log(
+          destroyPermanent(result, permanent.instanceId),
+          `${P(player.id)} ${permanent.card.name} died.`
+        );
         changed = true;
       }
     }

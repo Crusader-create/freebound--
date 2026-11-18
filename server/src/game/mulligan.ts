@@ -21,6 +21,7 @@
 import type { GameState, Player } from "../../../shared/src/types";
 import { OPENING_HAND_SIZE, shuffle } from "./createGame";
 import { startFirstTurn } from "./turns";
+import { log, p } from "./log";
 
 /** Mulliganing past this would leave a 0-card hand, so we stop here. */
 export const MAX_MULLIGANS = 6;
@@ -64,15 +65,13 @@ export function takeMulligan(state: GameState, playerId: string): MulliganResult
   }
 
   const reshuffled = shuffle([...player.hand, ...player.library]);
-  return {
-    ok: true,
-    state: replacePlayer(state, {
-      ...player,
-      hand: reshuffled.slice(0, OPENING_HAND_SIZE),
-      library: reshuffled.slice(OPENING_HAND_SIZE),
-      mulligansTaken: player.mulligansTaken + 1,
-    }),
-  };
+  const next = replacePlayer(state, {
+    ...player,
+    hand: reshuffled.slice(0, OPENING_HAND_SIZE),
+    library: reshuffled.slice(OPENING_HAND_SIZE),
+    mulligansTaken: player.mulligansTaken + 1,
+  });
+  return { ok: true, state: log(next, `${p(playerId)} took a mulligan.`) };
 }
 
 export function keepHand(state: GameState, playerId: string): MulliganResult {
@@ -91,6 +90,7 @@ export function keepHand(state: GameState, playerId: string): MulliganResult {
     library: [...player.library, ...bottomed],
     keptHand: true,
   });
+  next = log(next, `${p(playerId)} kept ${kept.length} cards.`);
 
   // Once both players have kept, the game itself begins with turn 1.
   if (next.players.every((p) => p.keptHand)) {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   BattlefieldCard,
   Card,
@@ -127,6 +127,63 @@ function Field({ cards, mine }: { cards: BattlefieldCard[]; mine: boolean }) {
   );
 }
 
+// ---------- game log ----------
+
+// The server writes {p:id} for a player and {P:id} for "player's".
+// Each seat sees itself as "You" and the other seat as "Opponent".
+function renderLogText(text: string, myId: string): string {
+  const out = text
+    .replace(/\{p:([^}]+)\}/g, (_, id) => (id === myId ? "you" : "your opponent"))
+    .replace(/\{P:([^}]+)\}/g, (_, id) => (id === myId ? "your" : "your opponent's"));
+  // Capitalize the start of every sentence ("you" -> "You").
+  return out.replace(/(^|[.:]\s+)([a-z])/g, (_, lead, ch) => lead + ch.toUpperCase());
+}
+
+const LOG_PREF_KEY = "freebound.showLog";
+
+function loadLogPref(): boolean {
+  try {
+    return localStorage.getItem(LOG_PREF_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+function saveLogPref(on: boolean) {
+  try {
+    localStorage.setItem(LOG_PREF_KEY, on ? "on" : "off");
+  } catch {
+    // Storage can be unavailable (private mode); the toggle still works for this visit.
+  }
+}
+
+function GameLog({ entries, myId }: { entries: { turn: number; text: string }[]; myId: string }) {
+  const endRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [entries.length]);
+  return (
+    <div className="log" aria-live="polite">
+      <h3>Game log</h3>
+      {entries.length === 0 ? (
+        <p className="log-empty">Nothing has happened yet.</p>
+      ) : (
+        <ol>
+          {entries.map((e, i) => {
+            const newTurn = i === 0 || entries[i - 1].turn !== e.turn;
+            return (
+              <li key={i} className={newTurn && i > 0 ? "new-turn" : undefined}>
+                {renderLogText(e.text, myId)}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      <div ref={endRef} />
+    </div>
+  );
+}
+
 // ---------- the app ----------
 
 export default function App() {
@@ -145,9 +202,19 @@ export default function App() {
   const [attackers, setAttackers] = useState<string[]>([]);
   const [blocks, setBlocks] = useState<Record<string, string>>({});
   const [discards, setDiscards] = useState<string[]>([]);
+  const [showLog, setShowLog] = useState(loadLogPref);
+
+  function toggleLog() {
+    setShowLog((on) => {
+      saveLogPref(!on);
+      return !on;
+    });
+  }
 
   useEffect(() => {
     const onConnect = () => setConn("Connected");
+    // The socket may have connected before this listener was attached.
+    if (socket.connected) onConnect();
     const onDisconnect = () => setConn("Connection lost. Reconnecting...");
     const onQueued = () => {
       setErrors([]);
@@ -557,6 +624,9 @@ export default function App() {
               dev: pass both
             </button>
           )}
+          <button className="quiet" aria-pressed={showLog} onClick={toggleLog}>
+            {showLog ? "Hide log" : "Show log"}
+          </button>
           <button
             className="danger"
             onClick={() => {
@@ -627,6 +697,7 @@ export default function App() {
 
       <aside className={"panel" + (needsYou ? " needs-you" : "")}>
         <Panel />
+        {showLog && <GameLog entries={game.log ?? []} myId={mine.id} />}
         <div className="footer">
           {notice && <div className={"notice" + (notice.error ? " error" : "")}>{notice.text}</div>}
           <span className="conn">{conn}</span>
