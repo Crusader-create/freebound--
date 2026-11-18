@@ -7,6 +7,7 @@ import type {
 } from "../../shared/src/types";
 import { SAMPLE_DECKS } from "./sampleDecks";
 import { socket } from "./socket";
+import { loadMusicPref, saveMusicPref, startMusic, stopMusic } from "./music";
 
 type DeckError = { code: string; message: string };
 
@@ -203,6 +204,34 @@ export default function App() {
   const [blocks, setBlocks] = useState<Record<string, string>>({});
   const [discards, setDiscards] = useState<string[]>([]);
   const [showLog, setShowLog] = useState(loadLogPref);
+  const [musicOn, setMusicOn] = useState(loadMusicPref);
+
+  function toggleMusic() {
+    const on = !musicOn;
+    setMusicOn(on);
+    saveMusicPref(on);
+    if (on) startMusic();
+    else stopMusic();
+  }
+
+  // Browsers only allow sound after the player interacts with the page,
+  // so the music starts on the first click or key press.
+  useEffect(() => {
+    if (!musicOn) return;
+    const begin = () => startMusic();
+    window.addEventListener("pointerdown", begin, { once: true });
+    window.addEventListener("keydown", begin, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", begin);
+      window.removeEventListener("keydown", begin);
+    };
+  }, [musicOn]);
+
+  const musicButton = (
+    <button className="quiet" aria-pressed={musicOn} onClick={toggleMusic}>
+      {musicOn ? "Mute music" : "Play music"}
+    </button>
+  );
 
   function toggleLog() {
     setShowLog((on) => {
@@ -335,6 +364,7 @@ export default function App() {
               {queued ? "Looking for an opponent..." : "Find a match"}
             </button>
             <span className="status">{conn}</span>
+            <span className="music-slot">{musicButton}</span>
           </div>
           {errors.length > 0 && (
             <ul className="errors">
@@ -624,6 +654,7 @@ export default function App() {
               dev: pass both
             </button>
           )}
+          {musicButton}
           <button className="quiet" aria-pressed={showLog} onClick={toggleLog}>
             {showLog ? "Hide log" : "Show log"}
           </button>

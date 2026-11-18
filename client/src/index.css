@@ -152,6 +152,10 @@ select:focus {
   margin: 0 0 10px;
 }
 
+.lobby .music-slot {
+  margin-left: auto;
+}
+
 /* ---------- table ---------- */
 
 .table {
