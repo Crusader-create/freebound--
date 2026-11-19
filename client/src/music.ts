@@ -9,7 +9,7 @@
  */
 
 const TRACK = `${import.meta.env.BASE_URL}music/theme.mp3`;
-const VOLUME = 1; // 0 is silent, 1 is full volume
+const VOLUME = .59; // 0 is silent, 1 is full volume
 const PREF_KEY = "freebound.music";
 
 let audio: HTMLAudioElement | null = null;

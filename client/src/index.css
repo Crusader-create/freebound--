@@ -94,7 +94,8 @@ button.danger {
 }
 
 textarea,
-select {
+select,
+input[type="search"] {
   font: inherit;
   color: var(--ink);
   background: var(--felt-2);
@@ -103,7 +104,8 @@ select {
   padding: 8px 10px;
 }
 textarea:focus,
-select:focus {
+select:focus,
+input[type="search"]:focus {
   outline: 2px solid var(--brass);
   outline-offset: 1px;
 }
@@ -117,7 +119,7 @@ select:focus {
   padding: 32px 16px;
 }
 .lobby-card {
-  width: min(640px, 100%);
+  width: min(1080px, 100%);
 }
 .lobby h1 {
   font-size: 44px;
@@ -132,7 +134,7 @@ select:focus {
 }
 .lobby textarea {
   width: 100%;
-  min-height: 260px;
+  min-height: 380px;
   resize: vertical;
 }
 .lobby .row {
@@ -151,11 +153,249 @@ select:focus {
   padding: 0 0 0 18px;
   color: var(--hurt-ink);
 }
-.lobby .decks {
+
+/* ---------- lobby layout: decks on the left, your list on the right ---------- */
+
+.lobby-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+.lobby .section-head {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
   margin: 0 0 10px;
+}
+.lobby h2 {
+  font-size: 19px;
+  font-weight: 600;
+  margin: 0;
+}
+.lobby .loaded {
+  color: var(--ink-2);
+  font-size: 15px;
+}
+.lobby .pool-hint {
+  margin: 8px 0 0;
+  color: var(--ink-2);
+  font-size: 15px;
+}
+
+/* A button that reads as a text link (opens the card list). */
+button.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--brass);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+button.link:hover:not(:disabled) {
+  background: none;
+  color: var(--brass-2);
+}
+
+/* Color filters: small toggle chips. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+.filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 14px;
+}
+.filters button[aria-pressed="true"] {
+  border-color: var(--brass);
+  box-shadow: 0 0 0 1px var(--brass);
+}
+
+/* Mana-color dots. These stay the same in every theme: they're Magic's colors. */
+.pips {
+  display: inline-flex;
+  gap: 3px;
+}
+.pip {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--ink-3);
+}
+.pip-W { background: #f3ecd6; }
+.pip-R { background: #d0573f; }
+.pip-G { background: #4f8f56; }
+.pip-B { background: #3d3644; }
+
+/* Deck tiles */
+.deck-tiles {
+  list-style: none;
+  margin: 0;
+  padding: 0 4px 0 0;
+  display: grid;
+  gap: 8px;
+  max-height: 452px;
+  overflow-y: auto;
+}
+.deck-tile {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--felt-2);
+}
+.deck-tile[aria-pressed="true"] {
+  border-color: var(--brass);
+  box-shadow: inset 4px 0 0 var(--brass);
+}
+.deck-tile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.deck-name {
+  font-weight: 600;
+  font-size: 16px;
+}
+.deck-desc {
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* ---------- "Cards you can use" dialog ---------- */
+
+.pool-dialog {
+  width: min(760px, calc(100% - 32px));
+  max-height: 86vh;
+  padding: 0;
+  border: 1px solid var(--rail-2);
+  border-radius: var(--radius);
+  background: var(--felt-2);
+  color: var(--ink);
+  box-shadow: 0 20px 50px var(--shadow);
+}
+.pool-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+.pool-inner {
+  display: flex;
+  flex-direction: column;
+  max-height: 86vh;
+  padding: 20px 22px 0;
+}
+.pool-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+.pool-head h2 {
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 600;
+}
+.pool-head p {
+  margin: 0;
+  color: var(--ink-2);
+  max-width: 60ch;
+}
+.pool-status {
+  color: var(--ink-2);
+  padding: 12px 0 20px;
+}
+.pool-keywords {
+  margin: 14px 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--brass);
+  background: var(--felt);
+  line-height: 1.55;
+  font-size: 15px;
+}
+.pool-controls input {
+  width: 100%;
+  margin: 0 0 10px;
+}
+.pool-list {
+  overflow-y: auto;
+  padding: 0 4px 20px 0;
+  border-top: 1px solid var(--rail);
+}
+.pool-list h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 16px 0 8px;
+}
+.pool-list h3 .count {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.pool-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+.pool-card {
+  padding: 8px 10px;
+  border: 1px solid var(--felt-3);
+  border-radius: var(--radius);
+  background: var(--felt);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.pool-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pool-card .name {
+  font-weight: 600;
+}
+.pool-card .cost {
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.pool-card .type {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink-2);
+  font-style: italic;
+}
+.pool-card .type .pt {
+  font-style: normal;
+  color: var(--ink);
+}
+.pool-card .text {
+  margin-top: 4px;
+  white-space: pre-line;
+}
+
+@media (max-width: 900px) {
+  .lobby-columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+  .deck-tiles {
+    max-height: 320px;
+  }
+  .lobby textarea {
+    min-height: 240px;
+  }
 }
 
 .lobby .music-slot {

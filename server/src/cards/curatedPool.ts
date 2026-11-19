@@ -30,6 +30,9 @@
  * still satisfy the "at least 3 ETB triggers" requirement.
  */
 
+import type { Card, CachedCard } from "../../../shared/src/types";
+import type { CardCache } from "./cardCache";
+
 export const CURATED_POOL_NAMES: readonly string[] = [
   // Basic lands
   "Plains",
@@ -96,6 +99,16 @@ export const CURATED_POOL_NAMES: readonly string[] = [
 ];
 
 const POOL_LOOKUP = new Set(CURATED_POOL_NAMES.map((n) => n.toLowerCase()));
+
+/**
+ * The pool's cards as found in the cache, in pool order (basics, then by
+ * color). Cards missing from the cache are skipped.
+ */
+export function curatedPoolCards(cache: CardCache): Card[] {
+  return CURATED_POOL_NAMES.map((name) => cache.get(name.toLowerCase()))
+    .filter((card): card is CachedCard => card !== undefined)
+    .map(({ standardLegal: _legal, ...card }) => card);
+}
 
 /** Case-insensitive membership check. */
 export function isInCuratedPool(cardName: string): boolean {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getManaAbility, parseManaCost, planPayment } from "./mana";
-import { BEAR, ELF, FOREST, MOUNTAIN, fakeCard, makePermanent } from "./testHelpers";
+import { BEAR, ELF, FOREST, MOUNTAIN, PLAINS, fakeCard, makePermanent } from "./testHelpers";
 
 describe("parseManaCost", () => {
   it("splits generic and colored requirements", () => {
@@ -68,6 +68,23 @@ describe("planPayment", () => {
     const f = makePermanent("p1", FOREST);
     const m = makePermanent("p1", MOUNTAIN);
     const plan = planPayment([f, m], cost("{1}{G}"));
+    expect(plan).toHaveLength(2);
+  });
+
+  it("pays generic costs from the most plentiful color, keeping the scarce one open", () => {
+    const plains = makePermanent("p1", PLAINS);
+    const m1 = makePermanent("p1", MOUNTAIN);
+    const m2 = makePermanent("p1", MOUNTAIN);
+    // Plains listed first on purpose: it must NOT be spent on the {1}.
+    const plan = planPayment([plains, m1, m2], cost("{1}{R}"));
+    expect(plan).toHaveLength(2);
+    expect(plan).not.toContain(plains.instanceId);
+  });
+
+  it("still uses the scarce color for generic when it's the only mana left", () => {
+    const plains = makePermanent("p1", PLAINS);
+    const m = makePermanent("p1", MOUNTAIN);
+    const plan = planPayment([plains, m], cost("{1}{R}"));
     expect(plan).toHaveLength(2);
   });
 

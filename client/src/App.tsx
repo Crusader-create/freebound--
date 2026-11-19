@@ -5,7 +5,8 @@ import type {
   GameStateView,
   Target,
 } from "../../shared/src/types";
-import { SAMPLE_DECKS } from "./sampleDecks";
+import { SAMPLE_DECKS, type SampleDeck } from "../../shared/src/sampleDecks";
+import { CardPoolDialog, DeckBrowser } from "./lobby";
 import { socket } from "./socket";
 import { applyTheme, loadTheme, THEMES, type ThemeId } from "./themes";
 import { loadMusicPref, saveMusicPref, startMusic, stopMusic } from "./music";
@@ -207,11 +208,21 @@ function GameLog({ entries, myId }: { entries: { turn: number; text: string }[];
 
 export default function App() {
   const [conn, setConn] = useState("Connecting...");
-  const [deckName, setDeckName] = useState(() => {
-    const names = Object.keys(SAMPLE_DECKS);
-    return names[Math.floor(Math.random() * names.length)];
-  });
-  const [deckText, setDeckText] = useState(() => SAMPLE_DECKS[deckName].trim());
+  // A random sample deck is loaded on arrival; players can pick another or paste their own.
+  const [startDeck] = useState(() => SAMPLE_DECKS[Math.floor(Math.random() * SAMPLE_DECKS.length)]);
+  const [deckName, setDeckName] = useState<string | null>(startDeck.name);
+  const [deckText, setDeckText] = useState(() => startDeck.list.trim());
+  const [poolOpen, setPoolOpen] = useState(false);
+
+  function pickDeck(deck: SampleDeck) {
+    setDeckName(deck.name);
+    setDeckText(deck.list.trim());
+    setErrors([]);
+  }
+
+  // Once the player edits the list, it's no longer that sample deck.
+  const loadedDeck = SAMPLE_DECKS.find((d) => d.name === deckName);
+  const deckEdited = !loadedDeck || loadedDeck.list.trim() !== deckText.trim();
   const [errors, setErrors] = useState<DeckError[]>([]);
   const [queued, setQueued] = useState(false);
   const [game, setGame] = useState<GameStateView | null>(null);
@@ -374,28 +385,34 @@ export default function App() {
     return (
       <div className="lobby">
         <div className="lobby-card">
-          <h1>Freebound</h1>
-          <p className="tagline">Paste a decklist. Find an opponent. Play.</p>
-          <div className="decks">
-            {Object.keys(SAMPLE_DECKS).map((name) => (
-              <button
-                key={name}
-                className={name === deckName ? "primary" : ""}
-                onClick={() => {
-                  setDeckName(name);
-                  setDeckText(SAMPLE_DECKS[name].trim());
-                }}
-              >
-                {name}
-              </button>
-            ))}
-          </div>
-          <textarea
-            value={deckText}
-            onChange={(e) => setDeckText(e.target.value)}
-            placeholder={"4 Lightning Strike\n22 Mountain\n..."}
-            spellCheck={false}
-          />
+          <header className="lobby-head">
+            <h1>Freebound</h1>
+            <p className="tagline">Paste a decklist. Find an opponent. Play.</p>
+          </header>
+
+          <div className="lobby-columns">
+            <DeckBrowser selected={deckEdited ? null : deckName} onPick={pickDeck} />
+
+            <section className="decklist" aria-labelledby="decklist-title">
+              <div className="section-head">
+                <h2 id="decklist-title">Your decklist</h2>
+                <span className="loaded">
+                  {deckEdited ? "Your own list" : `Loaded: ${deckName}`}
+                </span>
+              </div>
+              <textarea
+                value={deckText}
+                onChange={(e) => setDeckText(e.target.value)}
+                placeholder={"4 Lightning Strike\n22 Mountain\n..."}
+                spellCheck={false}
+                aria-labelledby="decklist-title"
+              />
+              <p className="pool-hint">
+                Only some cards are supported so far.{" "}
+                <button className="link" onClick={() => setPoolOpen(true)}>
+                  See the cards you can use
+                </button>
+              </p>
           <div className="row">
             <button
               className="primary"
@@ -414,6 +431,16 @@ export default function App() {
               ))}
             </ul>
           )}
+          {errors.some((e) => ["UNKNOWN_CARD", "NOT_IMPLEMENTED", "NOT_STANDARD_LEGAL"].includes(e.code)) && (
+            <p className="pool-hint">
+              <button className="link" onClick={() => setPoolOpen(true)}>
+                See which cards are supported
+              </button>
+            </p>
+          )}
+            </section>
+          </div>
+
           {/* Themes can only be changed here, not during a match. */}
           <div className="themes">
             <h2>Table theme</h2>
@@ -435,6 +462,7 @@ export default function App() {
               ))}
             </div>
           </div>
+          <CardPoolDialog open={poolOpen} onClose={() => setPoolOpen(false)} />
         </div>
       </div>
     );

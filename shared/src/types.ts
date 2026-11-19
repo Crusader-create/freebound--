@@ -29,6 +29,12 @@ export type Card = {
   imageUrl: string;
 };
 
+/** What the lobby's "Cards you can use" list receives from the server. */
+export type CardPoolInfo = {
+  keywords: string[];
+  cards: Card[];
+};
+
 /** Shape written to server/data/card-cache.json by fetch-cards.ts. */
 export type CachedCard = Card & { standardLegal: boolean };
 

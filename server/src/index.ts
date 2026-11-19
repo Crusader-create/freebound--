@@ -3,14 +3,16 @@ import express from "express";
 import { createServer } from "http";
 import { Server, type Socket } from "socket.io";
 import { parseDecklist } from "../../shared/src/deckParser";
-import type { GameState, Target } from "../../shared/src/types";
+import type { CardPoolInfo, GameState, Target } from "../../shared/src/types";
 import { loadCardCache } from "./cards/cardCache";
+import { curatedPoolCards } from "./cards/curatedPool";
 import { validateDeck } from "./cards/validateDeck";
 import { setEndStepStop } from "./game/autoPass";
 import { createGame, toView } from "./game/createGame";
 import { isBlockAssignment, type BlockAssignment } from "./game/combat";
 import { isTarget } from "./game/effects";
 import { autoAdvance, processCommand, type GameCommand } from "./game/engine";
+import { SUPPORTED_KEYWORDS } from "./game/keywords";
 import { log, p } from "./game/log";
 import { keepHand, takeMulligan } from "./game/mulligan";
 import { opponentOf } from "./game/stateHelpers";
@@ -41,6 +43,12 @@ app.get("/health", (_req, res) => {
 // Loaded once at startup so deck validation never touches the network.
 const cardCache = loadCardCache();
 console.log(`Loaded ${cardCache.size} card names into the cache.`);
+
+// The lobby's "Cards you can use" list. Built once; it never changes while running.
+const CARD_POOL_INFO: CardPoolInfo = {
+  keywords: [...SUPPORTED_KEYWORDS],
+  cards: curatedPoolCards(cardCache),
+};
 
 // ---------- players, sessions, and games ----------
 
@@ -205,6 +213,11 @@ io.on("connection", (socket) => {
   } else {
     console.log(`Client connected: ${socket.id} (player ${session.playerId})`);
   }
+
+  // Lobby reference: every card decks may use, plus the supported keywords.
+  socket.on("get_card_pool", (reply: unknown) => {
+    if (typeof reply === "function") reply(CARD_POOL_INFO);
+  });
 
   socket.on("ping_test", () => {
     socket.emit("pong_test", { message: "Server says hello", time: Date.now() });

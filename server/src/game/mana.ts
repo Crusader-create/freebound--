@@ -79,6 +79,11 @@ function toManaSource(permanent: BattlefieldCard): ManaSource | null {
  * generic ones. Lands are always preferred over mana creatures, so
  * creatures stay untapped to attack or block.
  *
+ * Generic mana comes from whichever color the player has the most of left
+ * untapped, so the scarcer color stays open. (With a Plains and two
+ * Mountains, {1}{R} taps both Mountains and the Plains can still cast a
+ * white spell.)
+ *
  * Greedy is optimal here because every source makes exactly one fixed color.
  */
 export function planPayment(
@@ -104,7 +109,19 @@ export function planPayment(
     }
   }
   for (let i = 0; i < cost.generic; i++) {
-    if (!take(() => true)) return null;
+    const left = sources.filter((s) => !used.has(s.id));
+    if (left.length === 0) return null;
+    const remaining = (color: string) => left.filter((s) => s.color === color).length;
+    const total = (color: string) => sources.filter((s) => s.color === color).length;
+    // Lands before creatures; then the color with the most left untapped;
+    // on a tie, the color the player has the most of overall.
+    const best = [...left].sort(
+      (a, b) =>
+        Number(a.isCreature) - Number(b.isCreature) ||
+        remaining(b.color) - remaining(a.color) ||
+        total(b.color) - total(a.color)
+    )[0];
+    used.add(best.id);
   }
 
   return Array.from(used);

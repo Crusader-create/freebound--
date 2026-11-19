@@ -21,7 +21,8 @@ export type Keyword =
   | "reach"
   | "defender";
 
-const SUPPORTED: ReadonlySet<string> = new Set([
+/** Every keyword the engine implements (also shown in the lobby's card list). */
+export const SUPPORTED_KEYWORDS: readonly Keyword[] = [
   "flying",
   "first strike",
   "trample",
@@ -31,7 +32,9 @@ const SUPPORTED: ReadonlySet<string> = new Set([
   "vigilance",
   "reach",
   "defender",
-]);
+];
+
+const SUPPORTED: ReadonlySet<string> = new Set(SUPPORTED_KEYWORDS);
 
 export function getKeywords(card: Card): Set<Keyword> {
   const text = card.oracleText.replace(/\([^)]*\)/g, ""); // drop reminder text
