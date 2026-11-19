@@ -5,6 +5,8 @@
  * of GameState.stack, so casting is a push and resolving is a pop.
  *
  *   - Permanent spells (creatures, etc.) enter the battlefield.
+ *   - Auras (Pacifism) enter attached to their target creature. If that
+ *     creature is gone by then, the Aura fizzles to the graveyard.
  *   - Instants and sorceries apply their effect, then go to their owner's
  *     graveyard. If the target is no longer legal by the time the spell
  *     resolves, the spell "fizzles": it does nothing, but still goes to the
@@ -42,6 +44,9 @@ function isPermanentSpell(card: CardInstance): boolean {
 
 function resolveSpell(state: GameState, spell: StackObject): GameState {
   const card = spell.source;
+
+  const auraEffect = getSpellEffect(card.card);
+  if (auraEffect?.kind === "pacify") return resolveAura(state, spell);
 
   if (isPermanentSpell(card)) {
     const controller = getPlayer(state, spell.controllerId);
@@ -111,6 +116,38 @@ function resolveSpell(state: GameState, spell: StackObject): GameState {
 
   const owner = getPlayer(next, card.ownerId);
   return replacePlayer(next, { ...owner, graveyard: [...owner.graveyard, card] });
+}
+
+/** An Aura enters attached to its target, or fizzles if the target is gone. */
+function resolveAura(state: GameState, spell: StackObject): GameState {
+  const card = spell.source;
+  const target = spell.targets[0];
+  const legal =
+    target !== undefined && targetProblem(state, "creature", target) === null && target.kind === "permanent";
+
+  if (!legal) {
+    const fizzled = log(state, `${card.card.name} had no legal target and did nothing.`);
+    const owner = getPlayer(fizzled, card.ownerId);
+    return replacePlayer(fizzled, { ...owner, graveyard: [...owner.graveyard, card] });
+  }
+
+  const what = describeTargetNow(state, target);
+  const controller = getPlayer(state, spell.controllerId);
+  const aura: BattlefieldCard = {
+    ...card,
+    controllerId: controller.id,
+    tapped: false,
+    summoningSick: false,
+    damageMarked: 0,
+    powerModifier: 0,
+    toughnessModifier: 0,
+    attacking: false,
+    attachedTo: target.instanceId,
+  };
+  return log(
+    replacePlayer(state, { ...controller, battlefield: [...controller.battlefield, aura] }),
+    `${card.card.name} enchanted ${what}. It can't attack or block.`
+  );
 }
 
 /** A target as it reads in the log, looked up at resolution time. */
