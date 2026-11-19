@@ -82,6 +82,9 @@ function isCastable(card: CardInstance): boolean {
   if (types.includes("Instant") || types.includes("Sorcery")) {
     return getSpellEffect(card.card) !== null;
   }
+  if (types.includes("Enchantment")) {
+    return getSpellEffect(card.card)?.kind === "pacify"; // the only Aura supported so far
+  }
   return false;
 }
 

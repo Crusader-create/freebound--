@@ -65,18 +65,35 @@ function CardImage({ card, big = false }: { card: Card; big?: boolean }) {
   );
 }
 
+/**
+ * Who's enchanted by an Aura (Pacifism), and card names for the "on X" tag.
+ * Built once per render from both battlefields.
+ */
+type AuraInfo = { pacified: Set<string>; nameOf: (instanceId: string) => string | undefined };
+
+function auraInfo(battlefields: BattlefieldCard[][]): AuraInfo {
+  const all = battlefields.flat();
+  return {
+    pacified: new Set(all.flatMap((c) => (c.attachedTo ? [c.attachedTo] : []))),
+    nameOf: (id) => all.find((c) => c.instanceId === id)?.card.name,
+  };
+}
+
 function Permanent({
   c,
   pickable = false,
   picked = false,
   onPick,
+  auras,
 }: {
   c: BattlefieldCard;
   pickable?: boolean;
   picked?: boolean;
   onPick?: () => void;
+  auras?: AuraInfo;
 }) {
   const sick = c.summoningSick && isCreature(c);
+  const pacified = auras?.pacified.has(c.instanceId) ?? false;
   const classes = [
     "perm",
     c.tapped && "tapped",
@@ -96,7 +113,9 @@ function Permanent({
       </div>
       {c.attacking && <span className="tag">attacking</span>}
       {c.blockingInstanceId !== undefined && <span className="tag">blocking</span>}
-      {!c.attacking && c.blockingInstanceId === undefined && sick && <span className="tag">new</span>}
+      {!c.attacking && c.blockingInstanceId === undefined && sick && !pacified && <span className="tag">new</span>}
+      {pacified && <span className="tag">pacified</span>}
+      {c.attachedTo && <span className="tag">on {auras?.nameOf(c.attachedTo) ?? "a creature"}</span>}
       {isCreature(c) && (
         <span className={"pt" + (hurt ? " hurt" : "")}>
           {power(c)}/{toughness(c) - c.damageMarked}
@@ -106,7 +125,7 @@ function Permanent({
   );
 }
 
-function Field({ cards, mine }: { cards: BattlefieldCard[]; mine: boolean }) {
+function Field({ cards, mine, auras }: { cards: BattlefieldCard[]; mine: boolean; auras: AuraInfo }) {
   const lands = cards.filter(isLand);
   const others = cards.filter((c) => !isLand(c));
   // Creatures sit nearest the middle of the table on both sides.
@@ -121,7 +140,7 @@ function Field({ cards, mine }: { cards: BattlefieldCard[]; mine: boolean }) {
         rows.map((row, i) => (
           <div className="row" key={i}>
             {row.map((c) => (
-              <Permanent key={c.instanceId} c={c} />
+              <Permanent key={c.instanceId} c={c} auras={auras} />
             ))}
           </div>
         ))
@@ -228,7 +247,12 @@ export default function App() {
   const [game, setGame] = useState<GameStateView | null>(null);
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
 
-  const [casting, setCasting] = useState<{ cardInstanceId: string; name: string } | null>(null);
+  // creaturesOnly: an Aura like Pacifism can only enchant a creature, so players aren't offered.
+  const [casting, setCasting] = useState<{
+    cardInstanceId: string;
+    name: string;
+    creaturesOnly?: boolean;
+  } | null>(null);
   const [attackers, setAttackers] = useState<string[]>([]);
   const [blocks, setBlocks] = useState<Record<string, string>>({});
   const [discards, setDiscards] = useState<string[]>([]);
@@ -472,17 +496,20 @@ export default function App() {
 
   const theirs = opp!;
   const mine = you!;
+  const auras = auraInfo([mine.battlefield, theirs.battlefield]);
 
   const playerTarget = (id: string): Target => ({ kind: "player", playerId: id });
   const permTarget = (id: string): Target => ({ kind: "permanent", instanceId: id });
 
-  function TargetChoices({ onPick }: { onPick: (t: Target) => void }) {
+  function TargetChoices({ onPick, creaturesOnly = false }: { onPick: (t: Target) => void; creaturesOnly?: boolean }) {
     return (
       <>
-        <div className="player-targets">
-          <button onClick={() => onPick(playerTarget(theirs.id))}>Opponent ({theirs.life})</button>
-          <button onClick={() => onPick(playerTarget(mine.id))}>You ({mine.life})</button>
-        </div>
+        {!creaturesOnly && (
+          <div className="player-targets">
+            <button onClick={() => onPick(playerTarget(theirs.id))}>Opponent ({theirs.life})</button>
+            <button onClick={() => onPick(playerTarget(mine.id))}>You ({mine.life})</button>
+          </div>
+        )}
         <div className="choices">
           {[...theirs.battlefield, ...mine.battlefield].filter(isCreature).map((c) => (
             <div key={c.instanceId} className="choice" onClick={() => onPick(permTarget(c.instanceId))}>
@@ -535,6 +562,7 @@ export default function App() {
           <>
             <h2>Choose a target for {casting!.name}</h2>
             <TargetChoices
+              creaturesOnly={casting!.creaturesOnly}
               onPick={(t) => {
                 socket.emit("cast_spell", { cardInstanceId: casting!.cardInstanceId, targets: [t] });
                 setCasting(null);
@@ -546,7 +574,9 @@ export default function App() {
           </>
         );
       case "attackers": {
-        const able = mine.battlefield.filter((c) => isCreature(c) && !c.tapped);
+        const able = mine.battlefield.filter(
+          (c) => isCreature(c) && !c.tapped && !auras.pacified.has(c.instanceId)
+        );
         return (
           <>
             <h2>Choose your attackers</h2>
@@ -572,7 +602,9 @@ export default function App() {
         );
       }
       case "blockers": {
-        const able = mine.battlefield.filter((c) => isCreature(c) && !c.tapped);
+        const able = mine.battlefield.filter(
+          (c) => isCreature(c) && !c.tapped && !auras.pacified.has(c.instanceId)
+        );
         const incoming = theirs.battlefield.filter((c) => c.attacking);
         return (
           <>
@@ -710,7 +742,7 @@ export default function App() {
       </div>
 
       <div className="opp-field">
-        <Field cards={theirs.battlefield} mine={false} />
+        <Field cards={theirs.battlefield} mine={false} auras={auras} />
       </div>
 
       <div className="middle">
@@ -768,7 +800,7 @@ export default function App() {
       </div>
 
       <div className="my-field">
-        <Field cards={mine.battlefield} mine />
+        <Field cards={mine.battlefield} mine auras={auras} />
         <div className="bar my-bar">
           <span className="who">You</span>
           <span className={"life" + (mine.life <= 5 ? " low" : "")}>{mine.life}</span>
@@ -793,7 +825,9 @@ export default function App() {
         <div className="fan">
           {mine.hand?.map((c) => {
             const land = isLand(c);
-            const targeted = c.card.types.includes("Instant") || c.card.types.includes("Sorcery");
+            const isAura = c.card.types.includes("Enchantment"); // Pacifism: the only Aura so far
+            const targeted =
+              c.card.types.includes("Instant") || c.card.types.includes("Sorcery") || isAura;
             const castOk = c.card.types.includes("Instant") ? instantSpeed : sorcerySpeed;
             const playable = prompt === "discard" ? false : land ? canPlayLand : castOk;
             const picked = prompt === "discard" && discards.includes(c.instanceId);
@@ -811,7 +845,7 @@ export default function App() {
                       land
                         ? socket.emit("play_land", { cardInstanceId: c.instanceId })
                         : targeted
-                          ? setCasting({ cardInstanceId: c.instanceId, name: c.card.name })
+                          ? setCasting({ cardInstanceId: c.instanceId, name: c.card.name, creaturesOnly: isAura })
                           : socket.emit("cast_spell", { cardInstanceId: c.instanceId })
                     }
                   >

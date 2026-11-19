@@ -28,7 +28,10 @@ export type TargetSpec =
 export type SpellEffect =
   | { kind: "damage"; amount: number; target: TargetSpec }
   | { kind: "pump"; power: number; toughness: number }
-  | { kind: "destroy"; target: "creature" | "attacking_or_blocking_creature" };
+  | { kind: "destroy"; target: "creature" | "attacking_or_blocking_creature" }
+  // An Aura like Pacifism: it enters attached to the target creature, which
+  // then can't attack or block (see combat.ts).
+  | { kind: "pacify" };
 
 // ---------- reading effects from oracle text ----------
 
@@ -38,6 +41,7 @@ const DAMAGE =
   /^[^.•—]+ deals (\d+) damage to (any target|target creature|target creature or planeswalker|target player or planeswalker)\.?$/i;
 const PUMP = /^target creature gets ([+-]\d+)\/([+-]\d+) until end of turn\.?$/i;
 const DESTROY = /^destroy target (attacking or blocking )?creature\.?$/i;
+const PACIFY = /^enchant creature enchanted creature can['’]t attack or block\.?$/i;
 
 const DAMAGE_TARGETS: Record<string, TargetSpec> = {
   "any target": "any",
@@ -72,6 +76,11 @@ export function getSpellEffect(card: Card): SpellEffect | null {
     };
   }
 
+  // (Subtypes like "Aura" aren't kept in the cache, so check the type and text.)
+  if (card.types.includes("Enchantment") && PACIFY.test(text)) {
+    return { kind: "pacify" };
+  }
+
   const destroy = DESTROY.exec(text);
   if (destroy) {
     return {
@@ -92,6 +101,8 @@ export function effectTargetSpec(effect: SpellEffect): TargetSpec {
       return "creature";
     case "destroy":
       return effect.target;
+    case "pacify":
+      return "creature";
   }
 }
 
@@ -186,5 +197,8 @@ export function applyEffect(
     case "destroy":
       if (target.kind !== "permanent") return state;
       return destroyPermanent(state, target.instanceId);
+
+    case "pacify":
+      return state; // the Aura itself is put onto the battlefield by stack.ts
   }
 }

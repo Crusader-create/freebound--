@@ -32,6 +32,7 @@
 
 import type { Card, CachedCard } from "../../../shared/src/types";
 import type { CardCache } from "./cardCache";
+import { supportProblem } from "./support";
 
 export const CURATED_POOL_NAMES: readonly string[] = [
   // Basic lands
@@ -102,11 +103,12 @@ const POOL_LOOKUP = new Set(CURATED_POOL_NAMES.map((n) => n.toLowerCase()));
 
 /**
  * The pool's cards as found in the cache, in pool order (basics, then by
- * color). Cards missing from the cache are skipped.
+ * color). Cards missing from the cache, or that the engine can't fully
+ * play (see support.ts), are left out.
  */
 export function curatedPoolCards(cache: CardCache): Card[] {
   return CURATED_POOL_NAMES.map((name) => cache.get(name.toLowerCase()))
-    .filter((card): card is CachedCard => card !== undefined)
+    .filter((card): card is CachedCard => card !== undefined && supportProblem(card) === null)
     .map(({ standardLegal: _legal, ...card }) => card);
 }
 

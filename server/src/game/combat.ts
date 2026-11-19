@@ -71,8 +71,25 @@ export function canBlock(blocker: BattlefieldCard, attacker: BattlefieldCard): b
   return true;
 }
 
+/**
+ * Creatures enchanted by a Pacifism-style Aura: they can't attack or block.
+ * (Pacifism is the only Aura the engine supports, so any attached Aura counts.)
+ */
+export function pacifiedIds(state: GameState): Set<string> {
+  const ids = new Set<string>();
+  for (const player of state.players) {
+    for (const permanent of player.battlefield) {
+      if (permanent.attachedTo) ids.add(permanent.attachedTo);
+    }
+  }
+  return ids;
+}
+
 export function eligibleAttackers(state: GameState): BattlefieldCard[] {
-  return getPlayer(state, state.activePlayerId).battlefield.filter(canAttack);
+  const pacified = pacifiedIds(state);
+  return getPlayer(state, state.activePlayerId).battlefield.filter(
+    (c) => canAttack(c) && !pacified.has(c.instanceId)
+  );
 }
 
 /** Defending creatures that could block at least one of the current attackers. */
@@ -81,8 +98,10 @@ export function eligibleBlockers(state: GameState): BattlefieldCard[] {
     (p) => p.attacking
   );
   const defender = opponentOf(state, state.activePlayerId);
-  return defender.battlefield.filter((blocker) =>
-    attackers.some((attacker) => canBlock(blocker, attacker))
+  const pacified = pacifiedIds(state);
+  return defender.battlefield.filter(
+    (blocker) =>
+      !pacified.has(blocker.instanceId) && attackers.some((attacker) => canBlock(blocker, attacker))
   );
 }
 
@@ -104,7 +123,9 @@ export function declareAttackers(
   for (const id of attackerIds) {
     const creature = player.battlefield.find((p) => p.instanceId === id);
     if (!creature) return fail("One of those creatures isn't yours.");
-    if (!canAttack(creature)) return fail(`${creature.card.name} can't attack.`);
+    if (!canAttack(creature) || pacifiedIds(state).has(creature.instanceId)) {
+      return fail(`${creature.card.name} can't attack.`);
+    }
   }
 
   const chosen = new Set(attackerIds);
@@ -169,6 +190,7 @@ export function declareBlockers(
     const attacker = attackerSide.battlefield.find((p) => p.instanceId === attackerId);
     if (!attacker || !attacker.attacking) return fail("You can only block an attacking creature.");
 
+    if (pacifiedIds(state).has(blocker.instanceId)) return fail(`${blocker.card.name} can't block.`);
     if (!canBlock(blocker, attacker)) {
       return fail(`${blocker.card.name} can't block ${attacker.card.name}.`);
     }

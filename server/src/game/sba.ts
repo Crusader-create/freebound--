@@ -7,6 +7,8 @@
  *   - A player with 0 or less life loses.
  *   - A creature with 0 or less toughness, or with damage at least equal to
  *     its toughness, dies (goes to its owner's graveyard).
+ *   - An Aura whose creature has left the battlefield goes to its owner's
+ *     graveyard.
  *
  * They're checked repeatedly until nothing changes, since one death can
  * cause another. The engine runs this after every successful command.
@@ -57,6 +59,21 @@ function applyOnce(state: GameState): GameState {
       }
     }
   }
+
+  // Auras attached to something that's no longer on the battlefield fall off.
+  const onBattlefield = new Set(result.players.flatMap((pl) => pl.battlefield.map((c) => c.instanceId)));
+  for (const player of result.players) {
+    for (const permanent of player.battlefield) {
+      if (permanent.attachedTo && !onBattlefield.has(permanent.attachedTo)) {
+        result = log(
+          destroyPermanent(result, permanent.instanceId),
+          `${P(player.id)} ${permanent.card.name} went to the graveyard (its creature left the battlefield).`
+        );
+        changed = true;
+      }
+    }
+  }
+
   return changed ? result : state;
 }
 

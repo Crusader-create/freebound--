@@ -18,6 +18,7 @@ import type { ParsedDecklist } from "../../../shared/src/deckParser";
 import type { CachedCard } from "../../../shared/src/types";
 import type { CardCache } from "./cardCache";
 import { isInCuratedPool } from "./curatedPool";
+import { supportProblem } from "./support";
 
 export const MIN_DECK_SIZE = 60;
 export const MAX_COPIES = 4;
@@ -95,6 +96,16 @@ export function validateDeck(
         cardName: card.name,
         message: `"${card.name}" isn't supported in Freebound yet.`,
       });
+    } else {
+      // In the pool, but double-check the engine can really play it.
+      const problem = supportProblem(card);
+      if (problem) {
+        errors.push({
+          code: "NOT_IMPLEMENTED",
+          cardName: card.name,
+          message: `"${card.name}" isn't supported in Freebound yet: ${problem}.`,
+        });
+      }
     }
 
     const isBasicLand = card.types.includes("Basic");

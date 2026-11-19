@@ -64,6 +64,7 @@ export type BattlefieldCard = CardInstance & {
   attacking: boolean;
   blockingInstanceId?: string; // which attacker this creature is blocking
   blockedBy?: string[]; // on an attacker: its blockers, in the order declared. Stays set even if they die
+  attachedTo?: string; // on an Aura: the instanceId of the permanent it enchants
 };
 
 // ---------- Players ----------

@@ -148,8 +148,10 @@ function playLand(
  *   - Instants: any time you have priority, even with the stack non-empty.
  *   - Creatures and sorceries: sorcery speed (your turn, a main phase,
  *     empty stack).
- * Not supported yet: enchantments, artifacts, and any instant or sorcery
- * whose effect isn't one of the three in effects.ts.
+ *   - Auras (only Pacifism-style ones so far): sorcery speed, and they
+ *     target the creature they'll enchant.
+ * Not supported yet: other enchantments, artifacts, and any instant or
+ * sorcery whose effect isn't one in effects.ts.
  */
 function castSpell(
   state: GameState,
@@ -177,12 +179,12 @@ function castSpell(
   const isInstant = types.includes("Instant");
   const isCreature = types.includes("Creature");
   const isSorcery = types.includes("Sorcery");
-  if (!isInstant && !isCreature && !isSorcery) {
+  // Creatures need no effect; everything else needs one the engine understands.
+  const effect = isCreature ? null : getSpellEffect(card.card);
+  const isAura = effect?.kind === "pacify";
+  if (!isInstant && !isCreature && !isSorcery && !isAura) {
     return fail("That kind of spell isn't supported yet.");
   }
-
-  // Creatures and sorceries need an effect-free check or a supported effect.
-  const effect = isCreature ? null : getSpellEffect(card.card);
   if (!isCreature && !effect) {
     return fail(`${name}'s effect isn't supported yet.`);
   }
