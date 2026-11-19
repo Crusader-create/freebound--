@@ -37,7 +37,14 @@ const io = new Server(httpServer, { cors: { origin: ALLOWED_ORIGINS } });
 
 /** Hosts poll this to know the server is up. */
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, games: games.size, uptimeSeconds: Math.round(process.uptime()) });
+  res.json({
+    ok: true,
+    games: games.size,
+    uptimeSeconds: Math.round(process.uptime()),
+    // Render sets RENDER_GIT_COMMIT on every deploy. Compare it with
+    // `git log -1 --oneline` to confirm the live server runs your latest push.
+    commit: process.env.RENDER_GIT_COMMIT?.slice(0, 7) ?? "local",
+  });
 });
 
 // Loaded once at startup so deck validation never touches the network.

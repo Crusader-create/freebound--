@@ -1,15 +1,12 @@
 /**
  * aura.test.ts
- *
- * Pacifism: "Enchant creature. Enchanted creature can't attack or block."
- * Cast at sorcery speed targeting a creature; it enters attached to it.
  */
 
 import { describe, expect, it } from "vitest";
 import type { GameState } from "../../../shared/src/types";
 import { eligibleAttackers, eligibleBlockers, pacifiedIds } from "./combat";
 import { getSpellEffect } from "./effects";
-import { processCommand } from "./engine";
+import { autoAdvance, processCommand, setAutoPass } from "./engine";
 import { destroyPermanent } from "./permanents";
 import { applyStateBasedActions } from "./sba";
 import { getPlayer, opponentOf } from "./stateHelpers";
@@ -123,5 +120,32 @@ describe("Pacifism", () => {
 
     expect(getPlayer(g, me).battlefield.some((c) => c.card.name === "Pacifism")).toBe(false);
     expect(getPlayer(g, me).graveyard.map((c) => c.card.name)).toContain("Pacifism");
+  });
+});
+
+describe("Pacifism across turns (auto-pass on, like the live game)", () => {
+  it("the opponent's pacified creature still can't attack on their next turn", () => {
+    setAutoPass(true);
+    try {
+      let { g, me, opp, pacifism, theirBear } = setup();
+      const free = addPermanent(g, opp, fakeCreature("Free Bear", 2, 2));
+      g = free.state;
+      g = autoAdvance(unwrap(cast(g, me, pacifism, theirBear)));
+      g = passUntil(g, (s) => s.stack.length === 0);
+      expect(g.log.some((l) => l.text.includes("Pacifism enchanted"))).toBe(true);
+
+      // Play on to the opponent's turn and their attack declaration.
+      g = passUntil(g, (s) => s.activePlayerId === opp && s.awaiting === "attackers");
+      const aura = getPlayer(g, me).battlefield.find((c) => c.card.name === "Pacifism");
+      expect(aura?.attachedTo).toBe(theirBear);
+
+      const attack = processCommand(g, { type: "DECLARE_ATTACKERS", playerId: opp, attackerIds: [theirBear] });
+      expect(attack.ok).toBe(false);
+      // The unenchanted creature can still attack.
+      const ok = processCommand(g, { type: "DECLARE_ATTACKERS", playerId: opp, attackerIds: [free.instanceId] });
+      expect(ok.ok).toBe(true);
+    } finally {
+      setAutoPass(false);
+    }
   });
 });
