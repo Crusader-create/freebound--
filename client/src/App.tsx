@@ -10,6 +10,7 @@ import { CardPoolDialog, DeckBrowser } from "./lobby";
 import { socket } from "./socket";
 import { applyTheme, loadTheme, THEMES, type ThemeId } from "./themes";
 import { loadMusicPref, saveMusicPref, startMusic, stopMusic } from "./music";
+import { useZoom } from "./zoom";
 
 type DeckError = { code: string; message: string };
 
@@ -41,12 +42,17 @@ function toughness(c: BattlefieldCard) {
 
 // ---------- cards ----------
 
-/** A card picture with a hover zoom. Falls back to text when there's no image. */
+/**
+ * A card picture. Falls back to text when there's no image. With `big`,
+ * hovering it shows the magnified card (see zoom.tsx).
+ */
 function CardImage({ card, big = false }: { card: Card; big?: boolean }) {
   const [broken, setBroken] = useState(false);
+  const zoom = useZoom(card);
+  const hover = big ? zoom : {};
   if (!card.imageUrl || broken) {
     return (
-      <div className="card-text">
+      <div className="card-text" {...hover}>
         <b>{card.name}</b>
         <span>{card.manaCost}</span>
         {card.power !== undefined && (
@@ -58,10 +64,7 @@ function CardImage({ card, big = false }: { card: Card; big?: boolean }) {
     );
   }
   return (
-    <span className="zoom">
-      <img className="card" src={card.imageUrl} alt={card.name} onError={() => setBroken(true)} />
-      {big && <img className="big" src={card.imageUrl} alt="" aria-hidden />}
-    </span>
+    <img className="card" src={card.imageUrl} alt={card.name} onError={() => setBroken(true)} {...hover} />
   );
 }
 

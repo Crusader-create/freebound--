@@ -723,25 +723,48 @@ button.link:hover:not(:disabled) {
   box-shadow: 0 0 0 1px var(--brass);
 }
 
-/* hover zoom for any card on the table */
-.zoom {
-  position: relative;
+/* ---------- magnified card (zoom.tsx) ----------
+ * Drawn once on top of the page with position: fixed, so it's never
+ * clipped by the battlefield and stays upright when the card is tapped.
+ */
+.magnified {
+  position: fixed;
+  z-index: 100;
+  border-radius: 12px;
+  box-shadow: 0 14px 36px var(--shadow);
+  pointer-events: none; /* never steals the hover from the card underneath */
 }
-.zoom .big {
-  display: none;
-  position: absolute;
-  z-index: 20;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  transform: translateX(-50%);
-  width: 240px;
-  height: 335px;
-  border-radius: 10px;
-  box-shadow: 0 12px 30px var(--shadow);
-  pointer-events: none;
+.magnified-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: var(--card-back);
+  border: 1px solid var(--rail-2);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.4;
 }
-.zoom:hover .big {
-  display: block;
+.magnified-text .mt-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 17px;
+}
+.magnified-text .mt-type {
+  color: var(--ink-2);
+  font-style: italic;
+  border-bottom: 1px solid var(--rail);
+  padding-bottom: 6px;
+}
+.magnified-text .mt-rules {
+  flex: 1;
+  white-space: pre-line;
+}
+.magnified-text .mt-pt {
+  align-self: flex-end;
+  font-weight: 600;
+  font-size: 18px;
 }
 
 /* ---------- hand ---------- */
